@@ -1,0 +1,11 @@
+# One FalkorDB instance holds a separate graph per team (hivemind_<team>).
+# Works with `docker compose up -d` or `podman compose up -d`.
+services:
+  falkordb:
+    image: docker.io/falkordb/falkordb:latest
+    ports:
+      - "6379:6379"   # Redis protocol, what agents connect to
+      - "3000:3000"   # FalkorDB Browser
+    volumes:
+      - ./data:/var/lib/falkordb/data
+    restart: unless-stopped

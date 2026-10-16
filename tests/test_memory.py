@@ -130,3 +130,18 @@ def test_start_task_adopts_the_automatic_task_from_the_prompt(repo):
     assert declared["intent_id"] == auto
     [t] = b.open_tasks()
     assert t["description"] == "Add revoke_token and reject revoked tokens"
+
+
+def test_function_missing_from_one_copy_keeps_its_memory(repo):
+    g, root = repo
+    p = root / "shop" / "tokens.py"
+    original = p.read_text()
+    p.write_text(original + "\n\ndef revoke(token):\n    sign(token)\n\ndef scratch():\n    pass\n")
+    kira = Brain(g, "kira")
+    kira.record_change("shop/tokens.py", index_file(g, root, "shop/tokens.py"))
+    kira.record_attempt(["revoke"], "Blocklist in memory", "succeeded", "tests pass")
+    # Carl's copy never had kira's functions; re-indexing it must not erase her memory.
+    p.write_text(original)
+    diff = index_file(g, root, "shop/tokens.py")
+    assert "shop/tokens.py::revoke" not in diff["removed"]
+    assert Brain(g, "x").context(["revoke"])["attempts"][0]["summary"] == "Blocklist in memory"

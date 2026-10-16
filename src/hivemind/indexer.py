@@ -255,10 +255,25 @@ def index_file(graph: Graph, root: Path, rel: str) -> dict[str, list[str]]:
             """,
             {"rows": [_fn_row(fn) for fn in fns], "p": rel},
         )
-    removed = [q for q in before if q not in after]
+    # Developers' working copies differ (branches, unpulled work). A function
+    # missing from this copy may still exist on someone else's machine, so
+    # only forget it if no team memory is attached to it.
+    missing = [q for q in before if q not in after]
+    removed = [
+        r[0]
+        for r in graph.query(
+            """
+            MATCH (fn:Function) WHERE fn.qname IN $q
+              AND NOT ( (:Attempt)-[:TOUCHED]->(fn) OR (:Decision)-[:GOVERNS]->(fn)
+                        OR (:Change)-[:CHANGED]->(fn) OR (:Intent)-[:CLAIMS]->(fn) )
+            RETURN fn.qname
+            """,
+            {"q": missing},
+        ).result_set
+    ] if missing else []
     if removed:
         graph.query("MATCH (fn:Function) WHERE fn.qname IN $q DETACH DELETE fn", {"q": removed})
-    if info is None:
+    if info is None and len(removed) == len(missing):
         graph.query("MATCH (f:File {path: $p}) DETACH DELETE f", {"p": rel})
 
     # Outgoing calls from this file: same-file definitions win, else any match.

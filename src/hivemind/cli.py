@@ -46,6 +46,16 @@ def cmd_demo(args: argparse.Namespace) -> None:
     run(_settings(args), pause=args.pause, step=args.step)
 
 
+def cmd_hook(args: argparse.Namespace) -> None:
+    from .hooks import main as hook_main
+
+    if args.team:
+        import os
+
+        os.environ["HIVEMIND_TEAM"] = args.team
+    hook_main()
+
+
 def cmd_status(args: argparse.Namespace) -> None:
     from .brain import Brain
 
@@ -79,6 +89,9 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--pause", type=float, default=2.5, help="seconds between beats")
     p.add_argument("--step", action="store_true", help="wait for enter between beats")
     p.set_defaults(func=cmd_demo)
+
+    p = sub.add_parser("hook", help="Claude Code hook entry point (reads the event on stdin)")
+    p.set_defaults(func=cmd_hook)
 
     p = sub.add_parser("status", help="print open tasks")
     p.set_defaults(func=cmd_status)

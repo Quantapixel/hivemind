@@ -57,6 +57,49 @@ class Brain:
             )
         return self.session_id
 
+    def attach_session(self, session_id: str) -> str:
+        """Reuse an external session id (e.g. Claude Code's) across processes."""
+        self.q(
+            """
+            MERGE (d:Developer {name: $dev})
+            MERGE (s:Session {id: $sid})
+            ON CREATE SET s.agent = $agent, s.started = $ts, s.status = 'open'
+            MERGE (d)-[:RAN]->(s)
+            """,
+            dev=self.dev,
+            sid=session_id,
+            agent=self.agent,
+            ts=_now(),
+        )
+        self.session_id = session_id
+        return session_id
+
+    def current_intent(self) -> str | None:
+        """This developer's most recent active intent, if any."""
+        r = self.q(
+            """
+            MATCH (i:Intent {status: 'active'}) WHERE i.dev = $dev
+            RETURN i.id AS id ORDER BY i.created DESC LIMIT 1
+            """,
+            dev=self.dev,
+        )
+        return r[0]["id"] if r else None
+
+    def functions_in_lines(self, path: str, start: int, end: int) -> list[str]:
+        return [
+            r["qname"]
+            for r in self.q(
+                """
+                MATCH (fn:Function {file: $path})
+                WHERE fn.lineno <= $end AND fn.end_lineno >= $start
+                RETURN fn.qname AS qname
+                """,
+                path=path,
+                start=start,
+                end=end,
+            )
+        ]
+
     def _event(self, kind: str, text: str, targets: list[str] | None = None) -> None:
         self.q(
             """

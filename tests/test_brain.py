@@ -111,3 +111,25 @@ def test_reindex_removes_deleted_functions(graph, tmp_path):
     stats = index_repo(graph, tmp_path)
     assert stats["functions"] == 2
     assert Brain(graph, "x").resolve(["validate_token"]) == []
+
+
+def test_hook_resolves_edit_to_functions_and_warns_once(graph):
+    from hivemind.hooks import pre_tool_use
+
+    Brain(graph, "alice").start_task("jwt", ["validate_token"])
+    bob = Brain(graph, "bob", "claude-code")
+    bob.attach_session("cc-test")
+    event = {
+        "tool_name": "Edit",
+        "cwd": str(SHOPAPP),
+        "tool_input": {
+            "file_path": str(SHOPAPP / "shop" / "orders.py"),
+            "old_string": '    total = cart.cart_total(user["id"])',
+        },
+    }
+    first = pre_tool_use(bob, event, SHOPAPP)
+    assert first["hookSpecificOutput"]["permissionDecision"] == "deny"
+    assert "checkout -> current_user -> validate_token" in first["hookSpecificOutput"]["permissionDecisionReason"]
+    assert pre_tool_use(bob, event, SHOPAPP) is None  # acknowledged, retry goes through
+    [task] = [t for t in bob.open_tasks() if t["dev"] == "bob"]
+    assert task["claimed"] == ["shop/orders.py::checkout"]  # only the edited function

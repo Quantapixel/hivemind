@@ -1,0 +1,28 @@
+[project]
+name = "hivemind"
+version = "0.1.0"
+description = "A shared graph brain for every coding agent on a team, powered by FalkorDB."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "falkordb>=1.0.10",
+    "mcp>=1.2.0",
+    "starlette>=0.40",
+    "uvicorn>=0.30",
+]
+
+[project.scripts]
+hivemind = "hivemind.cli:main"
+
+[dependency-groups]
+dev = ["pytest>=8"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/hivemind"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

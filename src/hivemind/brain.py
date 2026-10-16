@@ -160,37 +160,51 @@ class Brain:
         self._event("claim", f"claimed {len(qnames)} function(s)", qnames)
         return {"claimed": qnames, "unresolved": [t for t in targets if not self.resolve([t])], "conflicts": conflicts}
 
+    # Each direction is a different kind of risk, so they are searched
+    # separately rather than with one undirected traversal (which would also
+    # flag unrelated functions that merely share a caller).
+    _DIRECTIONS = {
+        "same": ("(t)", "same function"),
+        "depends_on_theirs": ("(t)-[:CALLS*1..{h}]->", "your code calls code they are changing"),
+        "theirs_depends_on_yours": ("(t)<-[:CALLS*1..{h}]-", "their code calls code you are changing"),
+    }
+
     def conflicts(self, targets: list[str], hops: int = 3) -> list[dict]:
-        """Find other developers' active claims within `hops` call-graph steps
-        of the given functions, in either direction. Returns the shortest path
-        for each (target, other claim) pair so the agent can explain it."""
+        """Find other developers' active claims linked to these functions
+        through the call graph (up to `hops` calls away, in one direction).
+        Returns the shortest path for each pair so the agent can explain it."""
         qnames = self.resolve(targets)
-        hops = max(0, min(int(hops), 6))
-        found = self.q(
-            f"""
-            MATCH (t:Function) WHERE t.qname IN $q
-            MATCH p = (t)-[:CALLS*0..{hops}]-(o:Function)<-[:CLAIMS]-(i:Intent {{status: 'active'}})
-            WHERE i.dev <> $dev
-            RETURN t.qname AS target, o.qname AS other_function, i.id AS intent_id,
-                   i.dev AS other_dev, i.description AS other_intent, length(p) AS distance,
-                   [n IN nodes(p) | n.qname] AS path
-            ORDER BY distance
-            """,
-            q=qnames,
-            dev=self.dev,
-        )
+        hops = max(1, min(int(hops), 6))
         best: dict[tuple[str, str, str], dict] = {}
-        for r in found:
-            # nodes(p) ends with the Intent; keep only the code path.
-            r["path"] = [n for n in r["path"] if n]
-            r["distance"] = len(r["path"]) - 1
-            key = (r["target"], r["other_function"], r["intent_id"])
-            if key not in best:
-                best[key] = r
-        out = sorted(best.values(), key=lambda r: r["distance"])
-        for r in out:
-            r["severity"] = "direct" if r["distance"] <= 1 else "nearby"
-        return out
+        for relation, (pattern, meaning) in self._DIRECTIONS.items():
+            if relation == "same":
+                match = "MATCH p = (t)<-[:CLAIMS]-(i:Intent {status: 'active'})"
+                other = "t.qname"
+            else:
+                match = f"MATCH p = {pattern.format(h=hops)}(o:Function)<-[:CLAIMS]-(i:Intent {{status: 'active'}})"
+                other = "o.qname"
+            for r in self.q(
+                f"""
+                MATCH (t:Function) WHERE t.qname IN $q
+                {match}
+                WHERE i.dev <> $dev
+                RETURN t.qname AS target, {other} AS other_function, i.id AS intent_id,
+                       i.dev AS other_dev, i.description AS other_intent,
+                       [n IN nodes(p) | n.qname] AS path
+                """,
+                q=qnames,
+                dev=self.dev,
+            ):
+                # nodes(p) ends with the Intent; keep only the code path.
+                r["path"] = [n for n in r["path"] if n]
+                r["distance"] = len(r["path"]) - 1
+                r["relation"] = relation
+                r["meaning"] = meaning
+                r["severity"] = "direct" if r["distance"] <= 1 else "nearby"
+                key = (r["target"], r["other_function"], r["intent_id"])
+                if key not in best or r["distance"] < best[key]["distance"]:
+                    best[key] = r
+        return sorted(best.values(), key=lambda r: r["distance"])
 
     def release(self, intent_id: str, outcome: str = "done", summary: str = "") -> dict:
         self.q(

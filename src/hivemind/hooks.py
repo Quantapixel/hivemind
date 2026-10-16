@@ -79,19 +79,24 @@ def team_brief(brain: Brain) -> str:
 
 def on_pre_edit(brain: Brain, ev: HookEvent, root: Path) -> str | None:
     """Claim what is about to change; return a reason to block, or None."""
-    qnames: list[str] = []
+    exact: list[str] = []      # functions whose text is being replaced: claim now
+    whole: list[str] = []      # whole-file rewrites: only check, claim after the diff
     for e in ev.edits:
         rel = _rel(root, e.path)
         if not rel:
             continue
         for start, end in _line_ranges(Path(e.path), e.old_text):
             for q in brain.functions_in_lines(rel, start, end):
-                if q not in qnames:
-                    qnames.append(q)
-    if not qnames:
+                bucket = exact if e.old_text and end < 10**9 else whole
+                if q not in bucket:
+                    bucket.append(q)
+    if not exact and not whole:
         return None
-    intent = brain.ensure_intent(f"Editing {_rel(root, ev.edits[0].path)}")
-    conflicts = brain.claim(intent, qnames)["conflicts"]
+    conflicts = brain.conflicts(whole) if whole else []
+    if exact:
+        intent = brain.ensure_intent(f"Editing {_rel(root, ev.edits[0].path)}")
+        conflicts += brain.claim(intent, exact, quiet=True)["conflicts"]
+    qnames = exact + whole
     acked = {r["key"] for r in brain.q("MATCH (a:Ack) WHERE a.dev = $dev RETURN a.key AS key", dev=brain.dev)}
     fresh = [c for c in conflicts if _ack_key(c) not in acked]
     if not fresh:

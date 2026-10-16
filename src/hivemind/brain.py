@@ -134,8 +134,22 @@ class Brain:
         iid = self.session_intent()
         if iid:
             return iid
-        iid = self.start_task(description)["intent_id"]
-        self.q("MATCH (i:Intent {id: $iid}) SET i.auto = true, i.session = $sid", iid=iid, sid=self._session())
+        sid, iid = self._session(), _id("int")
+        self.q(
+            """
+            MATCH (d:Developer {name: $dev}), (s:Session {id: $sid})
+            CREATE (i:Intent {id: $iid, description: $desc, status: 'active', dev: $dev, created: $ts,
+                              auto: true, session: $sid})
+            CREATE (d)-[:OWNS]->(i)
+            CREATE (s)-[:WORKS_ON]->(i)
+            """,
+            dev=self.dev,
+            sid=sid,
+            iid=iid,
+            desc=description,
+            ts=_now(),
+        )
+        self._event("start", description)
         return iid
 
     def note_prompt(self, prompt: str) -> str:
@@ -250,6 +264,25 @@ class Brain:
         """Declare what this agent is about to do, claim the code it will touch,
         and get back everything the team's agents already know about it."""
         sid = self._session()
+        auto = self.q(
+            """
+            MATCH (:Session {id: $sid})-[:WORKS_ON]->(i:Intent {status: 'active'}) WHERE i.auto = true
+            RETURN i.id AS id ORDER BY i.created DESC LIMIT 1
+            """,
+            sid=sid,
+        )
+        if auto:
+            # The hooks already opened a task for this session (named after the
+            # user's prompt); the agent's declaration refines it rather than
+            # creating a second one.
+            iid = auto[0]["id"]
+            self.q("MATCH (i:Intent {id: $iid}) SET i.description = $desc, i.auto = false", iid=iid, desc=intent)
+            self._event("start", intent)
+            result: dict[str, Any] = {"intent_id": iid, "session_id": sid}
+            if targets:
+                result.update(self.claim(iid, targets, hops=hops))
+                result["context"] = self.context(targets)
+            return result
         iid = _id("int")
         self.q(
             """
@@ -271,7 +304,7 @@ class Brain:
             result["context"] = self.context(targets)
         return result
 
-    def claim(self, intent_id: str, targets: list[str], hops: int = 3) -> dict:
+    def claim(self, intent_id: str, targets: list[str], hops: int = 3, quiet: bool = False) -> dict:
         qnames = self.resolve(targets)
         conflicts = self.conflicts(qnames, hops=hops)
         self.q(
@@ -286,7 +319,8 @@ class Brain:
             q=qnames,
             ts=_now(),
         )
-        self._event("claim", f"claimed {len(qnames)} function(s)", qnames)
+        if not quiet:
+            self._event("claim", f"claimed {len(qnames)} function(s)", qnames)
         return {"claimed": qnames, "unresolved": [t for t in targets if not self.resolve([t])], "conflicts": conflicts}
 
     # Each direction is a different kind of risk, so they are searched
@@ -435,7 +469,7 @@ class Brain:
             return {"changed": [], "conflicts": []}
         sid = self._session()
         iid = self.ensure_intent(f"Editing {path}")
-        conflicts = self.claim(iid, touched)["conflicts"] if touched else []
+        conflicts = self.claim(iid, touched, quiet=True)["conflicts"] if touched else []
         cid = _id("chg")
         self.q(
             """

@@ -119,3 +119,14 @@ def test_prompt_names_the_automatic_task(repo):
     [t] = b.open_tasks()
     assert t["description"] == "Default cart quantity should be two"
     assert t["claimed"] == ["shop/cart.py::add_item"]
+
+
+def test_start_task_adopts_the_automatic_task_from_the_prompt(repo):
+    g, _ = repo
+    b = Brain(g, "kira", "kiro")
+    b.attach_session("kiro-s9")
+    auto = b.note_prompt("add token revocation")
+    declared = b.start_task("Add revoke_token and reject revoked tokens", ["validate_token"])
+    assert declared["intent_id"] == auto
+    [t] = b.open_tasks()
+    assert t["description"] == "Add revoke_token and reject revoked tokens"

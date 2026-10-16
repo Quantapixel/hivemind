@@ -50,7 +50,8 @@ def test_edit_then_failing_tests_becomes_a_failed_attempt(repo):
     out = alice.record_test_run("pytest", passed=False, failure="test_refresh: AssertionError", signature="test_refresh")
     assert out["recorded"] == "failed"
     [a] = Brain(g, "bob").context(["validate_token"])["attempts"]
-    assert a["outcome"] == "failed" and a["auto"] and "Make tokens expire" in a["summary"]
+    assert a["outcome"] == "failed" and a["auto"] and a["summary"] == "validate_token changed · tests fail"
+    assert a["task"] == "Make tokens expire at the exact second"
     # Nothing changed since, so a re-run records no new attempt.
     assert alice.record_test_run("pytest", passed=False)["recorded"] is None
 
@@ -157,3 +158,15 @@ def test_agent_explanation_enriches_the_captured_attempt(repo):
     assert out["explained"]
     [a] = Brain(g, "bob").context(["validate_token"])["attempts"]
     assert a["summary"] == "Replaced HMAC with PyJWT" and "test_refresh failed" in a["reason"]
+
+
+def test_explaining_a_fix_updates_the_resolved_failure(repo):
+    g, _ = repo
+    alice, bob = Brain(g, "alice"), Brain(g, "bob")
+    alice.attach_session("a"); bob.attach_session("b")
+    alice.record_attempt(["validate_token"], "PyJWT decode", "failed", "old tokens rejected")
+    bob.record_change("shop/tokens.py", {"changed": ["shop/tokens.py::validate_token"]})
+    bob.record_test_run("pytest", True)
+    bob.record_attempt(["validate_token"], "Accept both token formats", "succeeded", "old sessions survive")
+    [f] = [a for a in Brain(g, "x").context(["validate_token"])["attempts"] if a["outcome"] == "failed"]
+    assert f["fix"] == "Accept both token formats"

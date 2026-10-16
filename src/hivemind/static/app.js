@@ -38,6 +38,10 @@ const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const short = (q) => (q || "").split("::").pop();
 const fileOf = (q) => (q || "").split("::")[0];
+const isTest = (q) => {
+  const path = fileOf(q), name = short(q).split(".").pop(), base = path.split("/").pop();
+  return /(^|\/)tests?\//.test(path) || base.startsWith("test_") || base.endsWith("_test.py") || name.startsWith("test");
+};
 const ago = (ts) => {
   if (!ts) return "never";
   const s = Math.max(0, Date.now() / 1000 - ts);
@@ -108,7 +112,7 @@ const S = {
   pathMode: false,
   pathFrom: null,
   path: null,            // {path, direction}
-  layers: store.get("layers", { calls: true, claims: true, memory: true }),
+  layers: { calls: true, claims: true, memory: true, tests: false, ...store.get("layers", {}) },
   colorMode: store.get("colorMode", "file"),
   hotspot: "rank",
   tab: "inspect",
@@ -507,7 +511,8 @@ function updateGraph(d) {
   const anchored = new Set();
   for (const l of d.links) if (l.kind === "claims") {
     claimedBy.set(l.target, [...(claimedBy.get(l.target) || []), l.dev]);
-    if (!anchored.has(l.source)) {  // one tag per task, on its first claimed function
+    if (!S.layers.tests && isTest(l.target)) continue;
+    if (!anchored.has(l.source)) {  // one tag per task, on its first visible claimed function
       anchored.add(l.source);
       const t = byId.get(l.source);
       if (t) tasksOn.set(l.target, [...(tasksOn.get(l.target) || []), t]);
@@ -529,8 +534,9 @@ function updateGraph(d) {
     c.path.forEach((p) => conflictNodes.add(p));
     for (let i = 0; i + 1 < c.path.length; i++) conflictEdges.add(c.path[i] + "|" + c.path[i + 1]);
   }
-  const fns = d.nodes.filter((n) => n.kind === "function");
-  const calls = d.links.filter((l) => l.kind === "calls");
+  const shown = (id) => S.layers.tests || !isTest(id);
+  const fns = d.nodes.filter((n) => n.kind === "function" && shown(n.id));
+  const calls = d.links.filter((l) => l.kind === "calls" && shown(l.source) && shown(l.target));
   neighbors = new Map();
   for (const l of calls) {
     (neighbors.get(l.source) || neighbors.set(l.source, new Set()).get(l.source)).add(l.target);
@@ -539,7 +545,7 @@ function updateGraph(d) {
   fileOrder = [...new Set(fns.map((n) => n.file))].sort();
   fileColor = new Map(fileOrder.map((f, i) => [f, FILE_COLORS[i % FILE_COLORS.length]]));
 
-  const next = JSON.stringify([fns.map((n) => n.id), calls.map((l) => l.source + ">" + l.target), [...tasksOn.keys()].sort()]);
+  const next = JSON.stringify([fns.map((n) => n.id), calls.map((l) => l.source + ">" + l.target), [...tasksOn.keys()].sort(), S.layers.tests]);
   if (next !== sig) {
     sig = next;
     // Seed new functions near their file's slot on a ring, so files start apart.
@@ -718,7 +724,7 @@ function renderInspector() {
   const blastByD = {};
   d.blast_radius.forEach((b) => (blastByD[b.distance] ||= []).push(b.caller));
   const conflictHere = (S.data?.conflicts || []).filter((c) => c.path.includes(d.id));
-  const failed = d.attempts.filter((a) => a.outcome === "failed").length;
+  const failed = d.attempts.filter((a) => a.outcome === "failed" && !a.resolved).length;
   box.innerHTML = `
     <div class="insp-head">
       <div class="kicker"><i data-icon="fn"></i>Function</div>
@@ -790,8 +796,9 @@ function attemptHtml(a) {
     <div class="meta"><span class="tag ${esc(a.outcome)}">${esc(a.outcome)}</span>
       ${(a.times || 1) > 1 ? `<span class="tag times" title="The same thing happened ${a.times} times">×${a.times}</span>` : ""}
       ${a.auto ? `<span class="tag" title="Captured automatically from a test run">auto</span>` : ""}
-      <span>${esc(seen)}</span><span>·</span><span>${ago(a.ts)}</span>
+      <span>${esc(seen)}</span>${agentTag(a.agent)}<span>·</span><span>${ago(a.ts)}</span>
       ${a.relation === "neighbour" ? `<span>·</span><span>on ${fnChip(a.function)}</span>` : ""}</div>
+    ${a.task ? `<div class="task-ref">for “${esc(a.task.length > 80 ? a.task.slice(0, 79) + "…" : a.task)}”</div>` : ""}
   </div>`;
 }
 function introHtml() {
@@ -1068,7 +1075,9 @@ $("#zoomFit").addEventListener("click", () => Graph.zoomToFit(400, 70));
 $("#layers").addEventListener("click", (e) => {
   const b = e.target.closest("button"); if (!b) return;
   S.layers[b.dataset.layer] = !S.layers[b.dataset.layer]; b.classList.toggle("on", S.layers[b.dataset.layer]);
-  store.set("layers", S.layers); Graph.linkVisibility(Graph.linkVisibility());
+  store.set("layers", S.layers);
+  if (b.dataset.layer === "tests" && S.data) { S.userMoved = false; updateGraph(S.data); }
+  else Graph.linkVisibility(Graph.linkVisibility());
 });
 $("#colorMode").addEventListener("click", (e) => {
   const b = e.target.closest("button"); if (!b) return;
@@ -1119,6 +1128,7 @@ document.addEventListener("keydown", (e) => {
 (async function boot() {
   setTheme(params.get("theme") || store.get("theme", window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark"));
   paintIcons();
+  document.querySelectorAll("#layers button").forEach((b) => b.classList.toggle("on", !!S.layers[b.dataset.layer]));
   initGraph();
   await loadTeams();
   syncUrl();

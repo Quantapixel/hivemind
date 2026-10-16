@@ -26,8 +26,8 @@ class Demo:
         self.graph = connect(settings)
         self.pause = pause
         self.step = step
-        self.alice = Brain(self.graph, "alice", "claude-code")
-        self.bob = Brain(self.graph, "bob", "cursor")
+        self.alice = Brain(self.graph, "alice", "claude")
+        self.bob = Brain(self.graph, "bob", "kiro")
         self.carol = Brain(self.graph, "carol", "codex")
 
     def say(self, who: str, text: str) -> None:

@@ -46,6 +46,23 @@ def _tokens(*texts: str) -> set[str]:
     return {w for w in words if len(w) > 1 and w not in _STOP}
 
 
+def is_test(qname: str) -> bool:
+    path, _, name = qname.partition("::")
+    base = path.rsplit("/", 1)[-1]
+    return bool(re.search(r"(^|/)tests?/", path) or base.startswith("test_") or base.endswith("_test.py")
+                or name.split(".")[-1].startswith("test"))
+
+
+def describe_change(qnames: list[str]) -> str:
+    """'issue_token, validate_token changed (+3 tests)'."""
+    code = [q.split("::")[-1] for q in qnames if not is_test(q)]
+    tests = sum(1 for q in qnames if is_test(q))
+    shown = ", ".join(code[:3]) + (f" +{len(code) - 3}" if len(code) > 3 else "")
+    if not code:
+        return f"{tests} test{'s' if tests != 1 else ''} changed"
+    return f"{shown} changed" + (f" (+{tests} test{'s' if tests != 1 else ''})" if tests else "")
+
+
 def similarity(a: str, b: str) -> float:
     """Word-overlap (Jaccard) similarity, used to spot repeated memories."""
     ta, tb = _tokens(a), _tokens(b)
@@ -526,18 +543,12 @@ class Brain:
         if not pending:
             return {"recorded": None, "reason": "no code changed since the last test run"}
         self.q("MATCH (s:Session {id: $sid}) SET s.pending = []", sid=self.session_id)
-        names = ", ".join(q.split("::")[-1] for q in pending[:4]) + (f" +{len(pending) - 4}" if len(pending) > 4 else "")
         iid = self.session_intent()
-        task = ""
-        if iid:
-            r = self.q("MATCH (i:Intent {id: $iid}) RETURN i.description AS d", iid=iid)
-            task = r[0]["d"] if r else ""
+        what = describe_change(pending)
         if passed:
-            summary = f"Changed {names}; tests pass" + (f" ({task})" if task else "")
-            out = self.record_attempt(pending, summary, "succeeded", f"`{command}` passed", iid, auto=True)
+            out = self.record_attempt(pending, f"{what} · tests pass", "succeeded", f"`{command}` passed", iid, auto=True)
             return {"recorded": "succeeded", **out}
-        summary = f"Changed {names}; tests fail" + (f" ({task})" if task else "")
-        out = self.record_attempt(pending, summary, "failed", failure or f"`{command}` failed", iid, auto=True, signature=signature)
+        out = self.record_attempt(pending, f"{what} · tests fail", "failed", failure or f"`{command}` failed", iid, auto=True, signature=signature)
         return {"recorded": "failed", **out}
 
     # ------------------------------------------------------------------ memory
@@ -579,7 +590,10 @@ class Brain:
                 c = captured[0]
                 merged_reason = reason if not c["reason"] or c["reason"] in reason else f"{reason} ({c['reason']})" if reason else c["reason"]
                 self.q(
-                    "MATCH (a:Attempt {id: $aid}) SET a.summary = $summary, a.reason = $reason, a.auto = false, a.explained = true",
+                    """
+                    MATCH (a:Attempt {id: $aid}) SET a.summary = $summary, a.reason = $reason, a.auto = false, a.explained = true
+                    WITH a OPTIONAL MATCH (a)-[:RESOLVES]->(f:Attempt) SET f.resolved_summary = $summary
+                    """,
                     aid=c["id"],
                     summary=summary,
                     reason=merged_reason,
@@ -635,7 +649,7 @@ class Brain:
         )
         if intent_id:
             self.q(
-                "MATCH (i:Intent {id: $iid}), (a:Attempt {id: $aid}) CREATE (a)-[:PART_OF]->(i)",
+                "MATCH (i:Intent {id: $iid}), (a:Attempt {id: $aid}) CREATE (a)-[:PART_OF]->(i) SET a.task = i.description",
                 iid=intent_id,
                 aid=aid,
             )
@@ -795,9 +809,12 @@ class Brain:
             """
             MATCH (t:Function) WHERE t.qname IN $q
             MATCH (t)-[:CALLS*0..1]-(fn:Function)<-[:TOUCHED]-(a:Attempt)
-            RETURN DISTINCT a.summary AS summary, a.outcome AS outcome, a.reason AS reason,
-                   a.dev AS dev, a.ts AS ts, fn.qname AS function,
-                   CASE WHEN fn.qname IN $q THEN 'same' ELSE 'neighbour' END AS relation,
+            WITH a, collect(DISTINCT fn.qname) AS fns
+            WITH a, [f IN fns WHERE f IN $q] AS same, fns
+            RETURN a.id AS id, a.summary AS summary, a.outcome AS outcome, a.reason AS reason,
+                   a.dev AS dev, a.ts AS ts, a.task AS task, a.agent AS agent,
+                   CASE WHEN size(same) > 0 THEN same[0] ELSE fns[0] END AS function,
+                   CASE WHEN size(same) > 0 THEN 'same' ELSE 'neighbour' END AS relation,
                    coalesce(a.count, 1) AS times, coalesce(a.devs, [a.dev]) AS seen_by,
                    coalesce(a.auto, false) AS auto, coalesce(a.resolved, false) AS resolved,
                    a.resolved_dev AS resolved_by, a.resolved_summary AS fix

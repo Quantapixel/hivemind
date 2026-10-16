@@ -1,6 +1,13 @@
 # ⬡ Hivemind
 
-**A shared graph brain for every coding agent on a team.** Built on [FalkorDB](https://falkordb.com) for Graph Hacks, Track 02: Agent Memory and Coordination.
+**A shared graph brain for every coding agent on a team.** Built on [FalkorDB](https://falkordb.com) for [Graph Hacks: Context for AI Agents](https://www.wemakedevs.org/hackathons/falkordb) (WeMakeDevs × FalkorDB, Oct 15–18 2026).
+
+| | |
+|---|---|
+| **▶ Live demo** | **[hivemind-live-demo.vercel.app](https://hivemind-live-demo.vercel.app)**: press Play, no sign-up |
+| **Demo video** | DEMO_VIDEO_LINK |
+| **Track** | Agent Memory and Coordination (Track 02) |
+| **Built with** | FalkorDB Cloud · Python · MCP · Claude Code, Kiro and Codex hooks · Vercel |
 
 Five developers each run their own Claude Code, Codex or Kiro agent on the same repo. None of those agents knows what the others are doing. Agent A rewrites `validate_token()` while Agent B builds on its old behaviour. Agent C retries a fix that Agent D found breaks production yesterday. Every session starts from zero.
 
@@ -10,7 +17,7 @@ Hivemind puts every agent on one graph. It holds the code's call graph, who is c
 - **Memory of what failed, captured automatically.** When an agent changes code and the tests fail, that failure is attached to the exact functions it changed. It reaches the next agent that touches that function *or anything that calls it*, on any machine, in any later session, whichever agent that developer uses. When a later change makes the tests pass, the failure is marked fixed, along with the fix.
 - **Clean handoffs.** Alice's agent stops mid-task, and Bob's agent resumes it the next morning with every session, attempt and note.
 
-**▶ Live demo: [hivemind-live-demo.vercel.app](https://hivemind-live-demo.vercel.app)**. Press **Play** to watch five developers using Claude Code, Kiro and Codex work on one project through the shared memory: conflicts caught before anyone writes code, a failure that two attempts hit and that gets merged, a handoff, a fix that resolves the failure, and a decision that supersedes an older one. No sign-up needed.
+**▶ [Live demo](https://hivemind-live-demo.vercel.app)**: press **Play** to watch five developers using Claude Code, Kiro and Codex work on one project through the shared memory: conflicts caught before anyone writes code, a failure that two attempts hit and that gets merged, a handoff, a fix that resolves the failure, and a decision that supersedes an older one. No sign-up needed.
 
 ![live view](docs/live-view.png)
 
@@ -88,27 +95,119 @@ Every question Hivemind answers is a question about connections:
 
 In a relational store, each of these would mean stitching rows together with recursive joins on every agent step. In FalkorDB each one is a single Cypher query, fast enough to run before every edit.
 
-## Graph model
+## Graph data model
+
+One FalkorDB graph per team (`hivemind_<team>`, using FalkorDB's multi-graph support). The **code layer** is built from the repo; everything else is **team memory** attached to it.
 
 ```
-                       ┌──────────── code layer (indexer) ────────────┐
-                       (File)-[:DEFINES]->(Function)-[:CALLS]->(Function)
-                       (File)-[:IMPORTS]->(File)
-                                  ▲            ▲            ▲
-                          [:CLAIMS]│   [:TOUCHED]│  [:GOVERNS]│
-(Developer)-[:OWNS]->(Intent)──────┘  (Attempt)──┘ (Decision)──┘   (Convention)-[:APPLIES_TO]->(File)
-     │                  ▲                 ▲              ▲                 ▲
-     └─[:RAN]->(Session)┴─[:WORKS_ON]     └─[:MADE]      └─[:DECIDED]      └─[:SET]  (Developer)
+CODE LAYER (indexer.py, re-indexed per file as agents edit)
+  (File)-[:DEFINES]->(Function)-[:CALLS]->(Function)        Function {qname, name, file, lineno, hash, calls}
+  (File)-[:IMPORTS]->(File)
+
+WHO IS DOING WHAT (coordination)
+  (Developer)-[:RAN]->(Session {agent})-[:WORKS_ON]->(Intent {description, status, progress})
+  (Developer)-[:OWNS]->(Intent)                               moves to the new owner on handoff
+  (Intent)-[:CLAIMS]->(Function)                              what a task is changing right now
+
+WHAT HAPPENED (episodic)
+  (Session)-[:MADE]->(Change {added, changed, removed})-[:CHANGED]->(Function)
+  (Session)-[:MADE]->(Attempt {outcome, reason, signature, count, devs})-[:TOUCHED]->(Function)
+  (Attempt)-[:RESOLVES]->(Attempt)                            a later success fixed this failure
+  (Attempt)-[:PART_OF]->(Intent)
+  (Session)-[:LOGGED]->(Event)                                activity feed
+
+WHAT IS TRUE / HOW WE WORK (semantic, procedural)
+  (Developer)-[:DECIDED]->(Decision)-[:GOVERNS]->(Function|File)
+  (Decision)-[:SUPERSEDES]->(Decision)                        only the newest is shown to agents
+  (Developer)-[:SET]->(Convention)-[:APPLIES_TO]->(File)
 ```
 
-| Memory type | Nodes | Lifetime |
+| Memory type | Nodes | How it changes over time |
 |---|---|---|
-| **Episodic**: what happened | `Session`, `Attempt`, `Event` | Permanent history |
-| **Semantic**: what is true | `Decision`, the code graph | Until superseded or re-indexed |
-| **Procedural**: how we work | `Convention` | Repo-wide or scoped to files |
-| **Coordination**: shared state | `Intent` + `CLAIMS` | Active → handed off → done |
+| **Episodic**: what happened | `Session`, `Change`, `Attempt`, `Event` | Repeats merge (`count`, `devs`); failures get `RESOLVES` links when fixed |
+| **Semantic**: what is true | `Decision`, the code graph | Restated decisions `SUPERSEDE` older ones; code re-indexed per edit by AST hash |
+| **Procedural**: how we work | `Convention` | Duplicates merge |
+| **Coordination**: shared state | `Intent` + `CLAIMS` | Active → handed off → resumed → done |
 
-Each team gets its own isolated graph (`hivemind_<team>`) in a single FalkorDB instance, using FalkorDB's multi-graph support.
+## Architecture
+
+```
+ Developer A (anywhere)                Developer B (anywhere)
+ Claude Code / Kiro / Codex            Claude Code / Kiro / Codex
+   ├─ hooks: hivemind hook               ├─ hooks
+   └─ MCP:   hivemind serve              └─ MCP
+          │   Cypher over redis(s)://          │
+          ▼                                    ▼
+   ┌──────────────── FalkorDB Cloud ────────────────┐
+   │  hivemind_<team>   hivemind_<other team>  ...  │
+   └───────────────────────▲────────────────────────┘
+                           │
+        Vercel: dashboard (access code) · public demo (simulation)
+```
+
+Every agent action goes straight to the graph. No server of ours sits in between, so there's nothing else to run. Timestamps come from the database server's clock, because laptops disagree.
+
+## Cypher queries and graph algorithms it depends on
+
+Every feature is one or two queries. These are the ones the product can't work without (simplified only by removing parameters):
+
+**1. Conflict detection: is anyone changing code mine calls, or code that calls mine?** (`brain.py: conflicts`). This runs before every edit, in both directions separately so functions that merely share a caller don't count:
+```cypher
+MATCH (t:Function) WHERE t.qname IN $mine
+MATCH p = (t)-[:CALLS*1..3]->(o:Function)<-[:CLAIMS]-(i:Intent {status: 'active'})   // or (t)<-[:CALLS*1..3]-(o)
+WHERE i.dev <> $me
+RETURN t.qname, o.qname, i.dev, i.description, [n IN nodes(p) | n.qname] AS path
+```
+
+**2. Context before editing: what has been tried on this code or its neighbours?** (`brain.py: context`)
+```cypher
+MATCH (t:Function) WHERE t.qname IN $q
+MATCH (t)-[:CALLS*0..1]-(fn:Function)<-[:TOUCHED]-(a:Attempt)
+WITH a, collect(DISTINCT fn.qname) AS fns
+RETURN a.summary, a.outcome, a.reason, a.count, a.devs, a.resolved, a.resolved_summary
+```
+
+**3. A success resolves earlier failures** (`brain.py: record_attempt`)
+```cypher
+MATCH (f:Attempt {outcome: 'failed'})-[:TOUCHED]->(fn:Function)
+WHERE fn.qname IN $q AND coalesce(f.resolved, false) = false
+WITH DISTINCT f MATCH (a:Attempt {id: $fix})
+CREATE (a)-[:RESOLVES]->(f) SET f.resolved = true, f.resolved_dev = $dev
+```
+Duplicates are merged first: a new attempt with the same outcome on the same functions and the same failing tests (or similar wording) increments `count` instead of creating a node.
+
+**4. Decisions supersede decisions** (`brain.py: record_decision`)
+```cypher
+MATCH (x:Decision)-[:GOVERNS]->(n)
+WHERE x.superseded = false AND ((n:Function AND n.qname IN $q) OR (n:File AND n.path IN $files))
+...
+CREATE (new)-[:SUPERSEDES]->(old) SET old.superseded = true
+```
+
+**5. Blast radius: what breaks if this changes?** (`brain.py: blast_radius`)
+```cypher
+MATCH (t:Function {qname: $q})
+MATCH p = (caller:Function)-[:CALLS*1..3]->(t)
+RETURN caller.qname, min(length(p)) AS distance
+```
+
+**6. Incremental re-index after an agent edits a file** (`indexer.py: index_file`). Each function's AST hash says what really changed, and calls are re-resolved by name:
+```cypher
+MATCH (a:Function {file: $file}) UNWIND a.calls AS name
+MATCH (b:Function {name: name}) WHERE b <> a
+WITH a, collect(b) AS targets, [t IN collect(b) WHERE t.file = a.file] AS local
+UNWIND CASE WHEN size(local) > 0 THEN local ELSE targets END AS t
+MERGE (a)-[:CALLS]->(t)
+```
+
+**7. Graph algorithms in the dashboard** (`ui.py`)
+```cypher
+CALL algo.pageRank('Function', 'CALLS') YIELD node, score                       // "core" functions
+CALL algo.betweenness({nodeLabels: ['Function'], relationshipTypes: ['CALLS']})  // chokepoints
+RETURN [n IN nodes(shortestPath((x)-[:CALLS*]->(y))) | n.qname]                 // path finder
+```
+
+**Remove FalkorDB and nothing works:** conflicts, context, consolidation, handoffs and the dashboard are all traversals over this graph.
 
 ## Memory that writes itself
 
@@ -227,7 +326,7 @@ uv run hivemind ui &                # http://127.0.0.1:8765 (⌘K to search)
 uv run hivemind demo --step         # press Enter to advance
 ```
 
-## The demo scenario
+## The local demo scenario
 
 `hivemind demo` plays this out on [`examples/shopapp`](examples/shopapp):
 
@@ -246,6 +345,10 @@ uv run pytest      # integration tests against the local FalkorDB; each test get
 ```
 
 Layout: `indexer.py` (code → graph, AST hashes, incremental) · `brain.py` (memory, consolidation, coordination) · `capture.py` (normalizes Claude/Kiro/Codex hook payloads, detects test runs) · `hooks.py` · `server.py` (MCP) · `setup.py` (`init`) · `watch.py` · `ui.py` + `static/` · `demo.py`. `tests/fixtures/hooks` holds payloads captured from real agent sessions.
+
+## How this was built (AI disclosure)
+
+As the hackathon rules require: Hivemind was built during the hackathon window (first commit on Oct 16, 2026) with **Claude Code** (Anthropic) as an AI coding assistant. Jaskaran Singh came up with the idea (agents on different machines sharing one memory of a codebase) and set the product direction: automatic capture across Claude Code, Kiro and Codex, a cloud-hosted setup with a Vercel dashboard, one-command onboarding and the public simulation. He also reviewed the results at each step. Much of the code was written by the assistant under that direction. It was verified with automated tests against a real FalkorDB (63 tests) and with real Claude Code, Kiro and Codex sessions (see *Tested with real agents*). All example data is synthetic: [`examples/shopapp`](examples/shopapp) is a made-up shop backend.
 
 ## Roadmap
 

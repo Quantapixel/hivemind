@@ -64,6 +64,7 @@ def init(repo: Path, settings: Settings) -> list[str]:
         hooks = data.setdefault("hooks", {})
         for event, entry in (
             ("PreToolUse", {"matcher": "Edit|Write|MultiEdit", "hooks": [{"type": "command", "command": hook_cmd}]}),
+            ("SessionStart", {"hooks": [{"type": "command", "command": hook_cmd}]}),
             ("SessionEnd", {"hooks": [{"type": "command", "command": hook_cmd}]}),
         ):
             existing = [
@@ -73,7 +74,7 @@ def init(repo: Path, settings: Settings) -> list[str]:
 
     # Local settings: the hook command embeds this machine's python path.
     _merge_json(repo / ".claude" / "settings.local.json", add_hooks)
-    done.append(".claude/settings.local.json: PreToolUse + SessionEnd hooks")
+    done.append(".claude/settings.local.json: SessionStart, PreToolUse and SessionEnd hooks")
 
     claude_md = repo / "CLAUDE.md"
     text = claude_md.read_text() if claude_md.exists() else ""

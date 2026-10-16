@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import time
 import uuid
-from typing import Any
+from typing import Any, Callable
 
 from falkordb import Graph
 
@@ -35,6 +35,9 @@ class Brain:
         self.dev = dev
         self.agent = agent
         self.session_id: str | None = None
+        # Optional source of an external session id (e.g. Claude Code's),
+        # consulted when the first write needs a session.
+        self.session_hint: Callable[[], str | None] | None = None
 
     # ------------------------------------------------------------------ helpers
 
@@ -43,6 +46,10 @@ class Brain:
 
     def _session(self) -> str:
         """Lazily open a session so every write is attributed to one."""
+        if self.session_id is None and self.session_hint:
+            hinted = self.session_hint()
+            if hinted:
+                return self.attach_session(hinted)
         if self.session_id is None:
             self.session_id = _id("ses")
             self.q(

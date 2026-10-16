@@ -7,6 +7,9 @@ PreToolUse on Edit / Write / MultiEdit:
     with the conflict path as the reason. The agent sees why, tells the
     user, and a retry goes through: a warning, not a lock.
 
+SessionStart: records Claude Code's session id in .claude/hivemind-session
+so the MCP server attributes its writes to the same session.
+
 SessionEnd: closes the tasks the hook opened automatically.
 """
 
@@ -21,6 +24,18 @@ from .brain import Brain
 from .db import Settings, connect
 
 EDIT_TOOLS = {"Edit", "Write", "MultiEdit"}
+SESSION_FILE = Path(".claude") / "hivemind-session"
+
+
+def session_id_for(claude_session_id: str) -> str:
+    return f"cc-{claude_session_id}"
+
+
+def read_session_hint(root: Path) -> str | None:
+    try:
+        return (root / SESSION_FILE).read_text().strip() or None
+    except OSError:
+        return None
 
 
 def _line_ranges(file_path: Path, tool: str, tool_input: dict) -> list[tuple[int, int]]:
@@ -123,10 +138,13 @@ def main() -> None:
         settings = Settings.from_env()
         brain = Brain(connect(settings), settings.dev, "claude-code")
         if event.get("session_id"):
-            brain.attach_session(f"cc-{event['session_id']}")
+            brain.attach_session(session_id_for(event["session_id"]))
         root = Path(os.environ.get("HIVEMIND_ROOT") or event.get("cwd") or ".")
         name = event.get("hook_event_name")
-        if name == "PreToolUse":
+        if name == "SessionStart" and brain.session_id:
+            (root / SESSION_FILE).parent.mkdir(exist_ok=True)
+            (root / SESSION_FILE).write_text(brain.session_id)
+        elif name == "PreToolUse":
             out = pre_tool_use(brain, event, root)
             if out:
                 print(json.dumps(out))

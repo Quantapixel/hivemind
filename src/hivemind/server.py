@@ -4,10 +4,14 @@ stdio, pointed at the team's shared FalkorDB."""
 
 from __future__ import annotations
 
+import os
+from pathlib import Path
+
 from mcp.server.mcpserver import MCPServer
 
 from .brain import Brain
 from .db import Settings, connect
+from .hooks import read_session_hint
 
 INSTRUCTIONS = """\
 Hivemind is the shared memory of every coding agent on this team. Other
@@ -127,4 +131,8 @@ def create_server(brain: Brain) -> MCPServer:
 def run(settings: Settings | None = None, agent: str = "agent", transport: str = "stdio") -> None:
     settings = settings or Settings.from_env()
     brain = Brain(connect(settings), settings.dev, agent)
+    root = os.environ.get("HIVEMIND_ROOT")
+    if root:
+        # Share the session the Claude Code SessionStart hook recorded.
+        brain.session_hint = lambda: read_session_hint(Path(root))
     create_server(brain).run(transport=transport)

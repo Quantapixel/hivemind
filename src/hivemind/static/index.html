@@ -23,6 +23,7 @@
   @keyframes pulse { 50% { opacity: .35; } }
   main { display: grid; grid-template-columns: 1fr 380px; height: calc(100% - 48px); }
   #graph { position: relative; overflow: hidden; }
+  #canvas { position: absolute; inset: 0; }
   #legend { position: absolute; left: 14px; bottom: 14px; display: flex; flex-wrap: wrap; gap: 12px;
     background: rgba(21,26,35,.85); border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; color: var(--muted); }
   #legend span { display: inline-flex; align-items: center; gap: 6px; }
@@ -64,6 +65,7 @@
 </header>
 <main>
   <div id="graph">
+    <div id="canvas"></div>
     <div id="devs"></div>
     <div id="legend">
       <span><i style="background:var(--fn)"></i>function</span>
@@ -97,9 +99,11 @@ const ago = (ts) => {
 const known = new Map();       // id -> node object, so layout survives refreshes
 let conflictEdges = new Set(); // "a|b" pairs on a conflict path
 let claimedBy = new Map();     // function id -> [dev]
+let onPath = new Set();        // function ids on a conflict path
 let lastSig = "";
 
-const el = document.getElementById("graph");
+const el = document.getElementById("canvas");
+let fitted = false;
 const Graph = ForceGraph()(el)
   .backgroundColor("#0d1017")
   .nodeId("id")
@@ -122,8 +126,10 @@ const Graph = ForceGraph()(el)
   .nodeCanvasObject(drawNode)
   .nodePointerAreaPaint((n, color, ctx) => { ctx.fillStyle = color; ctx.beginPath(); ctx.arc(n.x, n.y, 8, 0, 2 * Math.PI); ctx.fill(); })
   .onNodeClick((n) => n.kind === "function" && showDetail(n.id))
-  .cooldownTicks(120);
-Graph.d3Force("charge").strength(-90);
+  .cooldownTicks(150)
+  .onEngineStop(() => { if (!fitted) { fitted = true; Graph.zoomToFit(500, 70); } });
+Graph.d3Force("charge").strength(-110);
+Graph.d3Force("link").distance((l) => l.kind === "calls" ? 34 : 22);
 new ResizeObserver(() => Graph.width(el.clientWidth).height(el.clientHeight)).observe(el);
 
 function linkIds(l) {
@@ -143,14 +149,15 @@ function drawNode(n, ctx, scale) {
     const devs = claimedBy.get(n.id) || [];
     const r = devs.length ? 6 : 4;
     ctx.beginPath(); ctx.arc(n.x, n.y, r, 0, 2 * Math.PI);
-    ctx.fillStyle = devs.length ? "#e6e9ef" : "#5b6475"; ctx.fill();
+    ctx.fillStyle = devs.length ? "#e6e9ef" : onPath.has(n.id) ? "#ff4d5e" : "#5b6475"; ctx.fill();
     devs.forEach((d, i) => {
       ctx.beginPath(); ctx.arc(n.x, n.y, r + 2.5 + i * 2.5, 0, 2 * Math.PI);
       ctx.strokeStyle = devColor(d); ctx.lineWidth = 2; ctx.stroke();
     });
-    if (devs.length || scale > 1.6) {
-      ctx.font = `${devs.length ? 600 : 400} ${font}px ui-monospace, monospace`;
-      ctx.fillStyle = devs.length ? "#e6e9ef" : "#8a93a5";
+    const hot = devs.length || onPath.has(n.id);
+    if (hot || scale > 1.6) {
+      ctx.font = `${hot ? 600 : 400} ${font}px ui-monospace, monospace`;
+      ctx.fillStyle = devs.length ? "#e6e9ef" : onPath.has(n.id) ? "#ff8a95" : "#8a93a5";
       ctx.textAlign = "center"; ctx.textBaseline = "top";
       ctx.fillText(n.name, n.x, n.y + r + 4 + devs.length * 2.5);
     }
@@ -182,6 +189,7 @@ function roundRect(ctx, x, y, w, h, r) {
 async function refreshGraph() {
   const data = await (await fetch("/api/graph")).json();
   conflictEdges = new Set();
+  onPath = new Set(data.conflicts.flatMap((c) => c.path));
   for (const c of data.conflicts) for (let i = 0; i + 1 < c.path.length; i++) conflictEdges.add(c.path[i] + "|" + c.path[i + 1]);
   claimedBy = new Map();
   for (const l of data.links) if (l.kind === "claims") claimedBy.set(l.target, [...(claimedBy.get(l.target) || []), l.dev]);
@@ -192,6 +200,7 @@ async function refreshGraph() {
     const nodes = data.nodes.map((n) => Object.assign(known.get(n.id) || {}, n));
     known.clear(); nodes.forEach((n) => known.set(n.id, n));
     Graph.graphData({ nodes, links: data.links });
+    if (!fitted) setTimeout(() => { fitted = true; Graph.zoomToFit(500, 70); }, 1800);
   }
   document.getElementById("devs").innerHTML = data.devs
     .map((d) => `<span class="dev" style="background:${devColor(d)}">${esc(d)}</span>`).join("");

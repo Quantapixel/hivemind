@@ -461,3 +461,23 @@ kbd {
   .banner { top: auto; bottom: 14px; left: 14px; right: 60px; transform: none; }
   .toolbar { right: 14px; }
 }
+
+/* ---------- captured memory ---------- */
+.agent-tag {
+  display: inline-block; font-size: 10.5px; line-height: 16px; padding: 0 6px; margin-left: 6px; border-radius: 4px;
+  color: var(--text-2); background: var(--raised); border: 1px solid var(--line); vertical-align: 1px; white-space: nowrap;
+}
+.dev .agents { margin-top: 3px; }
+.dev .agents .agent-tag:first-child { margin-left: 0; }
+.task .note.progress { border-left-color: var(--line-2); }
+.tag.times { color: var(--text); font-weight: 600; }
+.fix { display: flex; gap: 6px; align-items: flex-start; color: var(--green); font-size: 12px; margin-top: 4px; }
+.fix svg { width: 13px; height: 13px; flex: none; margin-top: 2px; }
+.fix b { font-weight: 600; }
+.tl.resolved .what, .card.resolved > .title span:last-child { text-decoration: line-through; text-decoration-color: var(--text-3); color: var(--text-2); }
+.card.superseded { opacity: .55; }
+.card .sup { font-size: 11.5px; color: var(--amber); margin-bottom: 4px; }
+.edits { display: flex; flex-direction: column; gap: 6px; }
+.edit-row { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--text-2); }
+.edit-row b { color: var(--text); font-weight: 500; }
+.edit-row time { margin-left: auto; color: var(--text-3); font-size: 11.5px; }

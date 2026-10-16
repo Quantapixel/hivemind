@@ -459,9 +459,11 @@ class Brain:
             """
             MATCH (i:Intent) WHERE i.status IN ['active', 'handed_off']
             OPTIONAL MATCH (i)-[:CLAIMS]->(fn:Function)
+            OPTIONAL MATCH (s:Session)-[:WORKS_ON]->(i)
             RETURN i.id AS intent_id, i.dev AS dev, i.description AS description, i.status AS status,
                    i.handoff_note AS handoff_note, i.handoff_to AS handoff_to, i.created AS created,
-                   collect(fn.qname) AS claimed
+                   i.progress AS progress, coalesce(i.auto, false) AS auto,
+                   collect(DISTINCT s.agent) AS agents, collect(DISTINCT fn.qname) AS claimed
             ORDER BY created
             """
         )
@@ -558,6 +560,34 @@ class Brain:
         that attempt's count goes up instead of a duplicate being stored."""
         qnames = self.resolve(targets)
         sid = self._session()
+        if not auto:
+            # The agent explaining something the hooks just captured (same
+            # session, same outcome, same code): its words replace the generic
+            # captured summary instead of becoming a second memory.
+            captured = self.q(
+                """
+                MATCH (:Session {id: $sid})-[:MADE]->(a:Attempt {outcome: $outcome, auto: true})-[:TOUCHED]->(fn:Function)
+                WHERE fn.qname IN $q AND a.ts > $since AND coalesce(a.resolved, false) = false
+                RETURN DISTINCT a.id AS id, a.reason AS reason ORDER BY a.ts DESC LIMIT 1
+                """,
+                sid=sid,
+                outcome=outcome,
+                q=qnames,
+                since=_now() - 1800,
+            )
+            if captured:
+                c = captured[0]
+                merged_reason = reason if not c["reason"] or c["reason"] in reason else f"{reason} ({c['reason']})" if reason else c["reason"]
+                self.q(
+                    "MATCH (a:Attempt {id: $aid}) SET a.summary = $summary, a.reason = $reason, a.auto = false, a.explained = true",
+                    aid=c["id"],
+                    summary=summary,
+                    reason=merged_reason,
+                )
+                if intent_id:
+                    self.q("MATCH (i:Intent {id: $iid}), (a:Attempt {id: $aid}) MERGE (a)-[:PART_OF]->(i)", iid=intent_id, aid=c["id"])
+                self._event("attempt", f"[{outcome}] {summary}", qnames)
+                return {"attempt_id": c["id"], "touched": qnames, "merged": True, "explained": True}
         dup = self._similar_attempt(qnames, outcome, summary, reason, signature)
         if dup:
             self.q(

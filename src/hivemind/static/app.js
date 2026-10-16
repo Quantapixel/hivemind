@@ -57,6 +57,8 @@ const devColor = (d) => DEV_COLORS[hash(d) % DEV_COLORS.length];
 const initials = (d) => (d || "?").slice(0, 1).toUpperCase();
 const avatar = (d, cls = "", online = false) =>
   `<span class="avatar ${cls}" style="--c:${devColor(d)}">${esc(initials(d))}${online ? '<span class="dot"></span>' : ""}</span>`;
+const AGENT_LABEL = { claude: "Claude Code", codex: "Codex", kiro: "Kiro", watch: "watcher" };
+const agentTag = (a) => (a ? `<span class="agent-tag">${esc(AGENT_LABEL[a] || a)}</span>` : "");
 const fnChip = (q) => `<button class="fn-chip" data-fn="${esc(q)}" title="${esc(q)}">${esc(short(q))}</button>`;
 // arrows[i] is the call direction between path[i] and path[i + 1].
 const chain = (path, arrows = []) => `<div class="chain">${path.map((p, i) =>
@@ -514,7 +516,11 @@ function updateGraph(d) {
   memOn = new Map();
   const mem = (fn) => memOn.get(fn) || memOn.set(fn, { failed: 0, worked: 0, decisions: 0 }).get(fn);
   for (const l of d.links) {
-    if (l.kind === "touched") { const a = byId.get(l.source); if (a?.outcome === "failed") mem(l.target).failed++; else if (a?.outcome === "succeeded") mem(l.target).worked++; }
+    if (l.kind === "touched") {
+      const a = byId.get(l.source);
+      if (a?.outcome === "failed" && !a.resolved) mem(l.target).failed += a.times || 1;
+      else if (a?.outcome === "succeeded") mem(l.target).worked++;
+    }
     if (l.kind === "governs") mem(l.target).decisions++;
   }
   conflictEdges = new Set();
@@ -676,7 +682,8 @@ function renderDevs() {
     return `<div class="dev ${S.focusDev === v.name ? "on" : ""}" data-dev="${esc(v.name)}" style="--c:${devColor(v.name)}">
       ${avatar(v.name, "", online)}
       <div class="meta"><div class="name">${esc(v.name)}</div>
-      <div class="sub">${v.open_tasks ? `${v.open_tasks} open task${v.open_tasks > 1 ? "s" : ""}` : "No open tasks"} · ${ago(v.last_seen)}</div></div>
+      <div class="sub">${v.open_tasks ? `${v.open_tasks} open task${v.open_tasks > 1 ? "s" : ""}` : "No open tasks"} · ${ago(v.last_seen)}</div>
+      ${(v.agents || []).length ? `<div class="agents">${v.agents.map(agentTag).join("")}</div>` : ""}</div>
       <i class="focus" data-icon="focus" title="Focus"></i></div>`;
   }).join("") : `<div class="empty">No one has connected yet.</div>`;
   paintIcons($("#devs"));
@@ -686,8 +693,9 @@ function renderTasks(d) {
   $("#tasks").innerHTML = d.tasks.length ? d.tasks.map((t) => `
     <div class="task">
       <div class="task-top">${avatar(t.dev, "sm")}<span class="name">${esc(t.dev)}</span><span class="status ${t.status}">${t.status === "handed_off" ? `handed off${t.handoff_to ? " → " + esc(t.handoff_to) : ""}` : "active"}</span></div>
-      <div class="desc">${esc(t.description)}</div>
+      <div class="desc">${esc(t.description)}${(t.agents || []).filter((a) => a && a !== "ui").map(agentTag).join("")}</div>
       ${t.handoff_note ? `<div class="note" title="Click to expand">${esc(t.handoff_note)}</div>` : ""}
+      ${t.progress && !t.handoff_note ? `<div class="note progress" title="The agent's latest summary. Click to expand">${esc(t.progress)}</div>` : ""}
       <div class="task-foot">${t.claimed.slice(0, 4).map(fnChip).join("")}${t.claimed.length > 4 ? `<span class="empty">+${t.claimed.length - 4}</span>` : ""}
         <button class="release" data-release="${esc(t.intent_id)}" title="Close this task and free its claims">Release</button></div>
     </div>`).join("") : `<div class="empty">No open tasks.</div>`;
@@ -746,14 +754,11 @@ function renderInspector() {
     </div>
 
     <div class="section"><h4>History <span class="count">${d.attempts.length}</span></h4>
-      ${d.attempts.length ? `<div class="timeline">${d.attempts.map((a) => `
-        <div class="tl" style="--c:${a.outcome === "failed" ? C.red : a.outcome === "succeeded" ? C.green : C.amber}">
-          <div class="what">${esc(a.summary)}</div>
-          ${a.reason ? `<div class="why">${esc(a.reason)}</div>` : ""}
-          <div class="meta"><span class="tag ${esc(a.outcome)}">${esc(a.outcome)}</span><span>${esc(a.dev)}</span><span>·</span><span>${ago(a.ts)}</span>
-            ${a.relation === "neighbour" ? `<span>·</span><span>on ${fnChip(a.function)}</span>` : ""}</div>
-        </div>`).join("")}</div>` : `<div class="empty">Nothing tried here yet.</div>`}
+      ${d.attempts.length ? `<div class="timeline">${d.attempts.map(attemptHtml).join("")}</div>` : `<div class="empty">Nothing tried here yet.</div>`}
     </div>
+
+    ${(d.changes || []).length ? `<div class="section"><h4>Edits <span class="count">${d.changes.length}</span></h4>
+      <div class="edits">${d.changes.map((c) => `<div class="edit-row">${avatar(c.dev, "sm")}<span><b>${esc(c.dev)}</b> ${c.kind === "added" ? "added it" : "changed it"}</span>${agentTag(c.agent)}<time>${ago(c.ts)}</time></div>`).join("")}</div></div>` : ""}
 
     <div class="section"><h4>Impact if changed <span class="count">${d.blast_radius.length}</span></h4>
       ${d.blast_radius.length ? Object.entries(blastByD).map(([k, fns]) => `
@@ -774,6 +779,20 @@ function renderInspector() {
     ${d.conventions.length ? `<div class="section"><h4>Conventions</h4>${d.conventions.map((c) => `<div class="card"><div class="title"><i data-icon="rule"></i><span>${esc(c.rule)}</span></div><div class="foot">${esc(c.dev)} · ${c.scope === "repo" ? "repo-wide" : "this file"}</div></div>`).join("")}</div>` : ""}
   `;
   paintIcons(box);
+}
+function attemptHtml(a) {
+  const col = a.resolved ? C.green : a.outcome === "failed" ? C.red : a.outcome === "succeeded" ? C.green : C.amber;
+  const seen = (a.seen_by || [a.dev]).join(", ");
+  return `<div class="tl ${a.resolved ? "resolved" : ""}" style="--c:${col}">
+    <div class="what">${esc(a.summary)}</div>
+    ${a.reason ? `<div class="why">${esc(a.reason)}</div>` : ""}
+    ${a.resolved ? `<div class="fix">${icon("check")}<span>Fixed by <b>${esc(a.resolved_by)}</b>: ${esc(a.fix || "")}</span></div>` : ""}
+    <div class="meta"><span class="tag ${esc(a.outcome)}">${esc(a.outcome)}</span>
+      ${(a.times || 1) > 1 ? `<span class="tag times" title="The same thing happened ${a.times} times">×${a.times}</span>` : ""}
+      ${a.auto ? `<span class="tag" title="Captured automatically from a test run">auto</span>` : ""}
+      <span>${esc(seen)}</span><span>·</span><span>${ago(a.ts)}</span>
+      ${a.relation === "neighbour" ? `<span>·</span><span>on ${fnChip(a.function)}</span>` : ""}</div>
+  </div>`;
 }
 function introHtml() {
   const s = S.data?.stats;
@@ -813,20 +832,23 @@ function renderMemory() {
   $("#memKind").querySelectorAll("button").forEach((b) => { b.textContent = `${b.dataset.v[0].toUpperCase() + b.dataset.v.slice(1)} ${m[b.dataset.v].length}`; });
   let html = "";
   if (S.memKind === "decisions") {
-    const xs = m.decisions.filter((x) => match(x.title, x.rationale, x.dev, x.source, ...x.governs));
-    html = xs.map((x) => `<div class="card"><div class="title"><svg class="glyph" viewBox="0 0 14 14"><path d="M7 1.5 12.5 7 7 12.5 1.5 7z" fill="${C.gold}"/></svg><span>${esc(x.title)}</span></div>
+    const xs = m.decisions.filter((x) => match(x.title, x.rationale, x.dev, x.source, ...x.governs))
+      .sort((a, b) => a.superseded - b.superseded || b.ts - a.ts);
+    html = xs.map((x) => `<div class="card ${x.superseded ? "superseded" : ""}">${x.superseded ? `<div class="sup">Superseded by “${esc(x.superseded_by || "a newer decision")}”</div>` : ""}<div class="title"><svg class="glyph" viewBox="0 0 14 14"><path d="M7 1.5 12.5 7 7 12.5 1.5 7z" fill="${C.gold}"/></svg><span>${esc(x.title)}</span></div>
       ${x.rationale ? `<div class="body">${esc(x.rationale)}</div>` : ""}
       <div class="foot">${avatar(x.dev, "sm")}${esc(x.dev)}${x.source ? `<span class="sep">·</span><span class="mono">${esc(x.source)}</span>` : ""}<span class="sep">·</span>${ago(x.ts)}</div>
       ${x.governs.length ? `<div class="foot">${x.governs.map((g) => (g.includes("::") ? fnChip(g) : `<span class="fn-chip">${esc(g)}</span>`)).join("")}</div>` : ""}</div>`).join("");
   } else if (S.memKind === "attempts") {
     const xs = m.attempts.filter((x) => match(x.summary, x.reason, x.dev, x.outcome, ...x.touched));
-    html = xs.map((x) => `<div class="card"><div class="title"><span class="tag ${esc(x.outcome)}">${esc(x.outcome)}</span><span>${esc(x.summary)}</span></div>
+    html = xs.map((x) => `<div class="card ${x.resolved ? "resolved" : ""}"><div class="title"><span class="tag ${esc(x.outcome)}">${esc(x.outcome)}</span><span>${esc(x.summary)}</span></div>
       ${x.reason ? `<div class="body">${esc(x.reason)}</div>` : ""}
-      <div class="foot">${avatar(x.dev, "sm")}${esc(x.dev)}<span class="sep">·</span>${ago(x.ts)}</div>
+      ${x.resolved ? `<div class="fix">${icon("check")}<span>Fixed by <b>${esc(x.resolved_by)}</b>: ${esc(x.fix || "")}</span></div>` : ""}
+      <div class="foot">${avatar(x.dev, "sm")}${esc((x.seen_by || [x.dev]).join(", "))}${agentTag(x.agent)}
+        ${x.times > 1 ? `<span class="tag times">×${x.times}</span>` : ""}${x.auto ? `<span class="tag">auto</span>` : ""}<span class="sep">·</span>${ago(x.ts)}</div>
       <div class="foot">${x.touched.map(fnChip).join("")}</div></div>`).join("");
   } else {
     const xs = m.conventions.filter((x) => match(x.rule, x.dev, ...x.files));
-    html = xs.map((x) => `<div class="card"><div class="title"><i data-icon="rule"></i><span>${esc(x.rule)}</span></div>
+    html = xs.map((x) => `<div class="card"><div class="title"><i data-icon="rule"></i><span>${esc(x.rule)}</span>${x.times > 1 ? `<span class="tag times" title="Stated ${x.times} times">×${x.times}</span>` : ""}</div>
       <div class="foot">${avatar(x.dev, "sm")}${esc(x.dev)}<span class="sep">·</span>${x.scope === "repo" ? "repo-wide" : x.files.map((f) => `<span class="fn-chip">${esc(f)}</span>`).join("")}<span class="sep">·</span>${ago(x.ts)}</div></div>`).join("");
   }
   $("#memList").innerHTML = html || `<div class="empty center">${q ? "Nothing matches that filter." : `No ${S.memKind} yet. Agents add them as they work, or add one yourself.`}</div>`;
@@ -836,6 +858,7 @@ const EVENT_STYLE = {
   start: ["play", "var(--blue)"], claim: ["task", "var(--text-3)"], release: ["check", "var(--green)"],
   attempt: ["bolt", "var(--amber)"], decision: ["diamond", "var(--gold)"], convention: ["rule", "var(--text-2)"],
   handoff: ["handoff", "var(--amber)"], resume: ["swap", "var(--blue)"],
+  edit: ["fn", "var(--text-2)"], test: ["check", "var(--text-2)"],
 };
 function renderFeed() {
   const d = S.data; if (!d) return;
@@ -856,7 +879,7 @@ function renderFeed() {
     } else text = esc(text);
     const targets = (e.targets || []).slice(0, 3).map(fnChip).join(" ");
     return `<div class="ev ${fresh ? "new" : ""}"><span class="k" style="color:${col}"><i data-icon="${ic}"></i></span>
-      <div class="txt"><b>${esc(e.dev)}</b> ${esc(e.kind === "claim" ? "claimed code" : e.kind)}<span class="t">${text}</span>${targets ? `<div class="task-foot" style="margin-top:5px">${targets}</div>` : ""}</div>
+      <div class="txt"><b>${esc(e.dev)}</b> ${esc({ claim: "claimed code", edit: "edited code", test: "ran tests" }[e.kind] || e.kind)}<span class="t">${text}</span>${targets ? `<div class="task-foot" style="margin-top:5px">${targets}</div>` : ""}</div>
       <time>${ago(e.ts)}</time></div>`;
   }).join("") || `<div class="empty center">Nothing has happened yet.</div>`;
   paintIcons($("#feed"));

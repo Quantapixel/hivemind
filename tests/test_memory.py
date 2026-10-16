@@ -145,3 +145,15 @@ def test_function_missing_from_one_copy_keeps_its_memory(repo):
     diff = index_file(g, root, "shop/tokens.py")
     assert "shop/tokens.py::revoke" not in diff["removed"]
     assert Brain(g, "x").context(["revoke"])["attempts"][0]["summary"] == "Blocklist in memory"
+
+
+def test_agent_explanation_enriches_the_captured_attempt(repo):
+    g, _ = repo
+    b = Brain(g, "alice", "claude")
+    b.attach_session("s-x")
+    b.record_change("shop/tokens.py", {"changed": ["shop/tokens.py::validate_token"]})
+    b.record_test_run("pytest", False, "test_refresh failed: boom", "test_refresh")
+    out = b.record_attempt(["validate_token"], "Replaced HMAC with PyJWT", "failed", "old tokens rejected")
+    assert out["explained"]
+    [a] = Brain(g, "bob").context(["validate_token"])["attempts"]
+    assert a["summary"] == "Replaced HMAC with PyJWT" and "test_refresh failed" in a["reason"]

@@ -121,7 +121,8 @@ def state(teams: Teams, team: str) -> dict:
         g,
         """
         MATCH (a:Attempt)-[:TOUCHED]->(f:Function)
-        RETURN a.id AS id, a.summary AS name, a.outcome AS outcome, a.dev AS dev, collect(f.qname) AS targets
+        RETURN a.id AS id, a.summary AS name, a.outcome AS outcome, a.dev AS dev,
+               coalesce(a.resolved, false) AS resolved, coalesce(a.count, 1) AS times, collect(f.qname) AS targets
         """,
     ):
         targets = r.pop("targets")
@@ -131,7 +132,7 @@ def state(teams: Teams, team: str) -> dict:
     for r in rows(
         g,
         """
-        MATCH (x:Decision)-[:GOVERNS]->(n)
+        MATCH (x:Decision)-[:GOVERNS]->(n) WHERE coalesce(x.superseded, false) = false
         RETURN x.id AS id, x.title AS name, x.dev AS dev,
                collect(CASE WHEN n:Function THEN n.qname END) AS fns,
                collect(CASE WHEN n:File THEN n.path END) AS files
@@ -162,7 +163,8 @@ def state(teams: Teams, team: str) -> dict:
         MATCH (d:Developer)
         OPTIONAL MATCH (d)-[:OWNS]->(i:Intent) WHERE i.status IN ['active', 'handed_off']
         OPTIONAL MATCH (d)-[:RAN]->(s:Session)
-        RETURN d.name AS name, count(DISTINCT i) AS open_tasks, count(DISTINCT s) AS sessions
+        RETURN d.name AS name, count(DISTINCT i) AS open_tasks, count(DISTINCT s) AS sessions,
+               [a IN collect(DISTINCT s.agent) WHERE a IS NOT NULL AND NOT a IN ['ui', 'agent']] AS agents
         ORDER BY name
         """,
     )
@@ -232,6 +234,16 @@ def function_detail(teams: Teams, team: str, fid: str) -> dict:
         "attempts": ctx["attempts"],
         "conventions": ctx["conventions"],
         "experts": brain.experts(fid),
+        "changes": rows(
+            brain.g,
+            """
+            MATCH (c:Change)-[:CHANGED]->(:Function {qname: $id})
+            RETURN c.dev AS dev, c.agent AS agent, c.tool AS tool, c.ts AS ts,
+                   CASE WHEN $id IN c.added THEN 'added' ELSE 'changed' END AS kind
+            ORDER BY ts DESC LIMIT 12
+            """,
+            {"id": fid},
+        ),
     }
 
 
@@ -279,7 +291,8 @@ def memory(teams: Teams, team: str) -> dict:
             """
             MATCH (x:Decision) OPTIONAL MATCH (x)-[:GOVERNS]->(n)
             RETURN x.id AS id, x.title AS title, x.rationale AS rationale, x.dev AS dev, x.source AS source,
-                   x.ts AS ts, collect(coalesce(n.qname, n.path)) AS governs
+                   x.ts AS ts, coalesce(x.superseded, false) AS superseded, x.superseded_title AS superseded_by,
+                   collect(coalesce(n.qname, n.path)) AS governs
             ORDER BY ts DESC
             """,
         ),
@@ -288,7 +301,10 @@ def memory(teams: Teams, team: str) -> dict:
             """
             MATCH (a:Attempt) OPTIONAL MATCH (a)-[:TOUCHED]->(f:Function)
             RETURN a.id AS id, a.summary AS summary, a.outcome AS outcome, a.reason AS reason, a.dev AS dev,
-                   a.ts AS ts, collect(f.qname) AS touched
+                   a.ts AS ts, coalesce(a.count, 1) AS times, coalesce(a.devs, [a.dev]) AS seen_by,
+                   coalesce(a.auto, false) AS auto, coalesce(a.resolved, false) AS resolved,
+                   a.resolved_dev AS resolved_by, a.resolved_summary AS fix, a.agent AS agent,
+                   collect(f.qname) AS touched
             ORDER BY ts DESC
             """,
         ),
@@ -296,7 +312,8 @@ def memory(teams: Teams, team: str) -> dict:
             g,
             """
             MATCH (c:Convention) OPTIONAL MATCH (c)-[:APPLIES_TO]->(f:File)
-            RETURN c.id AS id, c.rule AS rule, c.dev AS dev, c.scope AS scope, c.ts AS ts, collect(f.path) AS files
+            RETURN c.id AS id, c.rule AS rule, c.dev AS dev, c.scope AS scope, c.ts AS ts,
+                   coalesce(c.count, 1) AS times, collect(f.path) AS files
             ORDER BY ts DESC
             """,
         ),

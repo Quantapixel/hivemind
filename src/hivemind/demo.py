@@ -72,15 +72,24 @@ class Demo:
         for d in a["context"]["decisions"]:
             self.note(f"◆ decision in force: {d['title']} ({d['source']})")
 
-        self.beat("Alice's agent tries something and it fails")
+        self.beat("Alice's agent edits code and runs the tests (captured by hooks)")
+        self.alice.record_change("shop/tokens.py", {"changed": ["shop/tokens.py::validate_token"]}, "Edit")
+        self.say("alice", "hook: edit captured -> validate_token changed")
+        self.alice.record_test_run(
+            "pytest tests/test_auth.py",
+            False,
+            "test_refresh_session failed: AssertionError: token issued before deploy was rejected",
+            "tests/test_auth.py::test_refresh_session",
+        )
+        self.say("alice", f"hook: {RED}tests failed{RESET} -> failed attempt recorded on validate_token")
         self.alice.record_attempt(
             ["validate_token"],
             "Replaced HMAC check with PyJWT decode",
             "failed",
-            "test_refresh_session fails: tokens issued before deploy are rejected, users get logged out",
+            "tokens issued before deploy are rejected, users get logged out",
             a["intent_id"],
         )
-        self.say("alice", f"{RED}record_attempt [failed]{RESET} PyJWT decode breaks refresh_session")
+        self.note("Her agent explains why; the explanation merges into the captured failure.")
 
         self.beat("Bob's agent, on another machine, starts work on checkout")
         b = self.bob.start_task("Add rate limiting to checkout", ["checkout"])
@@ -115,11 +124,14 @@ class Demo:
         self.note("Bob's agent skips the dead end it would otherwise have repeated.")
 
         self.beat("Bob's agent ships the fix")
+        self.bob.record_change("shop/tokens.py", {"changed": ["shop/tokens.py::validate_token"]}, "Edit")
+        out = self.bob.record_test_run("pytest tests/test_auth.py", True)
+        self.say("bob", f"hook: {GREEN}tests pass{RESET} -> resolves {len(out.get('resolves', []))} earlier failure")
         self.bob.record_attempt(
             ["validate_token"],
             "Dual-format validation: accept HMAC and JWT, issue JWT behind FEATURE_JWT",
             "succeeded",
-            "all auth tests pass; old sessions survive deploy",
+            "old sessions survive deploy",
             a["intent_id"],
         )
         self.bob.record_decision(
@@ -129,7 +141,7 @@ class Demo:
             source="handoff from alice",
         )
         self.bob.release(a["intent_id"], "done", "dual-format tokens")
-        self.say("bob", f"{GREEN}record_attempt [succeeded]{RESET} and recorded a decision")
+        self.say("bob", "explained the fix and recorded a decision")
 
         self.beat("Anyone can now ask why validate_token looks the way it does")
         why = self.carol.why("validate_token")
@@ -137,7 +149,8 @@ class Demo:
             self.note(f"◆ {d['title']} — {d['dev']}, {d['source']}")
         for att in why["history"]:
             mark = f"{RED}✗" if att["outcome"] == "failed" else f"{GREEN}✓"
-            self.note(f"{mark} {att['summary']} — {att['dev']}{RESET}")
+            fixed = f" (fixed by {att['resolved_by']})" if att.get("resolved") else ""
+            self.note(f"{mark} {att['summary']} — {att['dev']}{fixed}{RESET}")
         print(f"\n{BOLD}Done.{RESET} Carol's refund task is still open; click around the live view.")
 
 

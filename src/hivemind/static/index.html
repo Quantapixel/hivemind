@@ -1,0 +1,261 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hivemind</title>
+<script src="https://cdn.jsdelivr.net/npm/force-graph@1.51.5/dist/force-graph.min.js"></script>
+<style>
+  :root {
+    --bg: #0d1017; --panel: #151a23; --line: #232a36; --text: #e6e9ef; --muted: #8a93a5;
+    --fn: #5b6475; --red: #ff4d5e; --green: #36c98e; --amber: #ffb347; --gold: #ffd23f;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
+    font: 13px/1.45 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; }
+  header { height: 48px; display: flex; align-items: center; gap: 14px; padding: 0 18px;
+    border-bottom: 1px solid var(--line); }
+  header h1 { font-size: 15px; margin: 0; letter-spacing: .3px; }
+  header .team { color: var(--muted); }
+  .live { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); margin-left: auto; }
+  .live::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--green);
+    box-shadow: 0 0 8px var(--green); animation: pulse 1.6s infinite; }
+  @keyframes pulse { 50% { opacity: .35; } }
+  main { display: grid; grid-template-columns: 1fr 380px; height: calc(100% - 48px); }
+  #graph { position: relative; overflow: hidden; }
+  #legend { position: absolute; left: 14px; bottom: 14px; display: flex; flex-wrap: wrap; gap: 12px;
+    background: rgba(21,26,35,.85); border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; color: var(--muted); }
+  #legend span { display: inline-flex; align-items: center; gap: 6px; }
+  #legend i { width: 10px; height: 10px; display: inline-block; border-radius: 50%; }
+  #devs { position: absolute; left: 14px; top: 14px; display: flex; gap: 8px; flex-wrap: wrap; }
+  .dev { padding: 3px 10px; border-radius: 999px; font-weight: 600; font-size: 12px; color: #0d1017; }
+  aside { border-left: 1px solid var(--line); background: var(--panel); overflow-y: auto; }
+  section { padding: 14px 16px; border-bottom: 1px solid var(--line); }
+  section h2 { font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: var(--muted); margin: 0 0 10px; }
+  .card { border: 1px solid var(--line); border-radius: 8px; padding: 9px 11px; margin-bottom: 8px; background: #11151d; }
+  .card.conflict { border-color: rgba(255,77,94,.5); background: rgba(255,77,94,.07); }
+  .card .who { font-weight: 600; }
+  .path { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11.5px; color: var(--muted); margin-top: 5px; word-break: break-word; }
+  .path b { color: var(--text); font-weight: 500; }
+  .tag { display: inline-block; font-size: 10.5px; padding: 1px 7px; border-radius: 4px; margin-left: 6px; vertical-align: 1px; }
+  .tag.direct { background: var(--red); color: #fff; }
+  .tag.nearby { background: rgba(255,179,71,.2); color: var(--amber); }
+  .tag.handed_off { background: rgba(255,210,63,.18); color: var(--gold); }
+  .tag.active { background: rgba(54,201,142,.15); color: var(--green); }
+  .feed .ev { display: grid; grid-template-columns: 56px 1fr; gap: 8px; padding: 5px 0; border-bottom: 1px dashed var(--line); }
+  .feed .ev:last-child { border-bottom: 0; }
+  .feed time { color: var(--muted); font-variant-numeric: tabular-nums; }
+  .feed .ev.new { animation: flash 1.5s ease-out; }
+  @keyframes flash { from { background: rgba(79,156,255,.18); } to { background: transparent; } }
+  .empty { color: var(--muted); font-style: italic; }
+  #detail { display: none; }
+  #detail.open { display: block; }
+  #detail .close { float: right; cursor: pointer; color: var(--muted); }
+  .kv { margin: 6px 0; }
+  .kv .k { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .6px; }
+  .fail { color: var(--red); } .ok { color: var(--green); }
+  @media (max-width: 900px) { main { grid-template-columns: 1fr; grid-template-rows: 55vh auto; } aside { border-left: 0; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>⬡ Hivemind</h1><span class="team" id="team"></span>
+  <span class="live">live</span>
+</header>
+<main>
+  <div id="graph">
+    <div id="devs"></div>
+    <div id="legend">
+      <span><i style="background:var(--fn)"></i>function</span>
+      <span><i style="background:transparent;border:2px solid #4f9cff"></i>claimed</span>
+      <span><i style="background:var(--red);border-radius:2px"></i>failed attempt</span>
+      <span><i style="background:var(--green);border-radius:2px"></i>worked</span>
+      <span><i style="background:var(--gold);transform:rotate(45deg);border-radius:1px"></i>decision</span>
+      <span><i style="background:var(--red);height:3px;border-radius:0"></i>conflict path</span>
+    </div>
+  </div>
+  <aside>
+    <section id="detail"></section>
+    <section><h2>Conflicts</h2><div id="conflicts"></div></section>
+    <section><h2>Open tasks</h2><div id="tasks"></div></section>
+    <section class="feed"><h2>Live feed</h2><div id="feed"></div></section>
+  </aside>
+</main>
+<script>
+const PALETTE = ["#4f9cff", "#ff8a3d", "#c77dff", "#36c98e", "#ff5d8f", "#2ec4d6", "#ffd23f"];
+const devColor = (name) => {
+  let h = 0; for (const c of name || "") h = (h * 31 + c.charCodeAt(0)) >>> 0;
+  return PALETTE[h % PALETTE.length];
+};
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const short = (q) => (q || "").split("::").pop();
+const ago = (ts) => {
+  const s = Math.max(0, Date.now() / 1000 - ts);
+  return s < 60 ? `${Math.floor(s)}s` : s < 3600 ? `${Math.floor(s / 60)}m` : `${Math.floor(s / 3600)}h`;
+};
+
+const known = new Map();       // id -> node object, so layout survives refreshes
+let conflictEdges = new Set(); // "a|b" pairs on a conflict path
+let claimedBy = new Map();     // function id -> [dev]
+let lastSig = "";
+
+const el = document.getElementById("graph");
+const Graph = ForceGraph()(el)
+  .backgroundColor("#0d1017")
+  .nodeId("id")
+  .linkSource("source").linkTarget("target")
+  .nodeLabel((n) => n.kind === "function" ? n.id : `${n.kind}: ${n.name}`)
+  .linkColor((l) => {
+    if (isConflict(l)) return "#ff4d5e";
+    if (l.kind === "claims") return devColor(l.dev) + "aa";
+    if (l.kind === "touched") return "rgba(255,77,94,.35)";
+    if (l.kind === "governs") return "rgba(255,210,63,.35)";
+    return "rgba(138,147,165,.22)";
+  })
+  .linkWidth((l) => isConflict(l) ? 3 : l.kind === "claims" ? 1.5 : 1)
+  .linkLineDash((l) => l.kind === "claims" || l.kind === "governs" ? [3, 3] : null)
+  .linkDirectionalArrowLength((l) => l.kind === "calls" ? 3 : 0)
+  .linkDirectionalArrowRelPos(1)
+  .linkDirectionalParticles((l) => isConflict(l) ? 3 : 0)
+  .linkDirectionalParticleWidth(3)
+  .linkDirectionalParticleColor(() => "#ff4d5e")
+  .nodeCanvasObject(drawNode)
+  .nodePointerAreaPaint((n, color, ctx) => { ctx.fillStyle = color; ctx.beginPath(); ctx.arc(n.x, n.y, 8, 0, 2 * Math.PI); ctx.fill(); })
+  .onNodeClick((n) => n.kind === "function" && showDetail(n.id))
+  .cooldownTicks(120);
+Graph.d3Force("charge").strength(-90);
+new ResizeObserver(() => Graph.width(el.clientWidth).height(el.clientHeight)).observe(el);
+
+function linkIds(l) {
+  const a = typeof l.source === "object" ? l.source.id : l.source;
+  const b = typeof l.target === "object" ? l.target.id : l.target;
+  return [a, b];
+}
+function isConflict(l) {
+  if (l.kind !== "calls") return false;
+  const [a, b] = linkIds(l);
+  return conflictEdges.has(a + "|" + b) || conflictEdges.has(b + "|" + a);
+}
+
+function drawNode(n, ctx, scale) {
+  const font = 11 / scale;
+  if (n.kind === "function") {
+    const devs = claimedBy.get(n.id) || [];
+    const r = devs.length ? 6 : 4;
+    ctx.beginPath(); ctx.arc(n.x, n.y, r, 0, 2 * Math.PI);
+    ctx.fillStyle = devs.length ? "#e6e9ef" : "#5b6475"; ctx.fill();
+    devs.forEach((d, i) => {
+      ctx.beginPath(); ctx.arc(n.x, n.y, r + 2.5 + i * 2.5, 0, 2 * Math.PI);
+      ctx.strokeStyle = devColor(d); ctx.lineWidth = 2; ctx.stroke();
+    });
+    if (devs.length || scale > 1.6) {
+      ctx.font = `${devs.length ? 600 : 400} ${font}px ui-monospace, monospace`;
+      ctx.fillStyle = devs.length ? "#e6e9ef" : "#8a93a5";
+      ctx.textAlign = "center"; ctx.textBaseline = "top";
+      ctx.fillText(n.name, n.x, n.y + r + 4 + devs.length * 2.5);
+    }
+  } else if (n.kind === "intent") {
+    const label = `${n.dev}: ${n.name.length > 32 ? n.name.slice(0, 31) + "…" : n.name}`;
+    ctx.font = `600 ${font}px ui-sans-serif, system-ui`;
+    const w = ctx.measureText(label).width + 12 / scale, h = font + 8 / scale;
+    ctx.fillStyle = devColor(n.dev);
+    ctx.globalAlpha = n.status === "handed_off" ? 0.55 : 1;
+    roundRect(ctx, n.x - w / 2, n.y - h / 2, w, h, 4 / scale); ctx.fill();
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = "#0d1017"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    ctx.fillText(label, n.x, n.y);
+  } else if (n.kind === "attempt") {
+    const s = 5;
+    ctx.fillStyle = n.outcome === "failed" ? "#ff4d5e" : n.outcome === "succeeded" ? "#36c98e" : "#ffb347";
+    ctx.fillRect(n.x - s / 2, n.y - s / 2, s, s);
+  } else if (n.kind === "decision") {
+    const s = 5;
+    ctx.save(); ctx.translate(n.x, n.y); ctx.rotate(Math.PI / 4);
+    ctx.fillStyle = "#ffd23f"; ctx.fillRect(-s / 2, -s / 2, s, s); ctx.restore();
+  }
+}
+function roundRect(ctx, x, y, w, h, r) {
+  ctx.beginPath(); ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath();
+}
+
+async function refreshGraph() {
+  const data = await (await fetch("/api/graph")).json();
+  conflictEdges = new Set();
+  for (const c of data.conflicts) for (let i = 0; i + 1 < c.path.length; i++) conflictEdges.add(c.path[i] + "|" + c.path[i + 1]);
+  claimedBy = new Map();
+  for (const l of data.links) if (l.kind === "claims") claimedBy.set(l.target, [...(claimedBy.get(l.target) || []), l.dev]);
+
+  const sig = JSON.stringify([data.nodes.map((n) => n.id + n.status), data.links.length]);
+  if (sig !== lastSig) {
+    lastSig = sig;
+    const nodes = data.nodes.map((n) => Object.assign(known.get(n.id) || {}, n));
+    known.clear(); nodes.forEach((n) => known.set(n.id, n));
+    Graph.graphData({ nodes, links: data.links });
+  }
+  document.getElementById("devs").innerHTML = data.devs
+    .map((d) => `<span class="dev" style="background:${devColor(d)}">${esc(d)}</span>`).join("");
+  renderConflicts(data.conflicts);
+}
+
+function renderConflicts(list) {
+  const box = document.getElementById("conflicts");
+  if (!list.length) { box.innerHTML = `<div class="empty">No one is stepping on anyone.</div>`; return; }
+  box.innerHTML = list.map((c) => `
+    <div class="card conflict">
+      <span class="who" style="color:${devColor(c.dev)}">${esc(c.dev)}</span> ↔
+      <span class="who" style="color:${devColor(c.other_dev)}">${esc(c.other_dev)}</span>
+      <span class="tag ${c.severity}">${c.distance === 0 ? "same function" : c.distance + " hop" + (c.distance > 1 ? "s" : "")}</span>
+      <div class="path">${c.path.map((p) => `<b>${esc(short(p))}</b>`).join(" → ")}</div>
+      <div class="path">${esc(c.meaning)}: “${esc(c.other_intent)}”</div>
+    </div>`).join("");
+}
+
+let seenEvents = new Set();
+async function refreshFeed() {
+  const data = await (await fetch("/api/feed")).json();
+  document.getElementById("team").textContent = "team · " + data.team;
+  document.getElementById("tasks").innerHTML = data.tasks.length ? data.tasks.map((t) => `
+    <div class="card">
+      <span class="who" style="color:${devColor(t.dev)}">${esc(t.dev)}</span>
+      <span class="tag ${t.status}">${t.status.replace("_", " ")}</span>
+      <div>${esc(t.description)}</div>
+      ${t.handoff_note ? `<div class="path">handoff → ${esc(t.handoff_to || "anyone")}: ${esc(t.handoff_note)}</div>` : ""}
+      <div class="path">${t.claimed.map((c) => esc(short(c))).join(", ")}</div>
+    </div>`).join("") : `<div class="empty">No open tasks.</div>`;
+  const first = seenEvents.size === 0;
+  document.getElementById("feed").innerHTML = data.events.map((e) => {
+    const key = e.ts + e.dev + e.kind;
+    const fresh = !first && !seenEvents.has(key);
+    seenEvents.add(key);
+    return `<div class="ev ${fresh ? "new" : ""}"><time>${ago(e.ts)} ago</time>
+      <div><span class="who" style="color:${devColor(e.dev)}">${esc(e.dev)}</span> · ${esc(e.kind)}<br>${esc(e.text)}</div></div>`;
+  }).join("") || `<div class="empty">Quiet so far.</div>`;
+}
+
+async function showDetail(id) {
+  const d = await (await fetch("/api/node?id=" + encodeURIComponent(id))).json();
+  const box = document.getElementById("detail");
+  box.className = "open";
+  box.innerHTML = `
+    <span class="close" onclick="this.parentElement.className=''">✕</span>
+    <h2>Why is it like this?</h2>
+    <div class="who" style="font-family:ui-monospace,monospace">${esc(id)}</div>
+    <div class="kv"><div class="k">Decisions</div>${d.why.decisions.map((x) =>
+      `<div>◆ ${esc(x.title)} <span class="path">— ${esc(x.dev)}${x.source ? ", " + esc(x.source) : ""}</span><div class="path">${esc(x.rationale)}</div></div>`).join("") || `<span class="empty">none recorded</span>`}</div>
+    <div class="kv"><div class="k">History</div>${d.why.history.map((a) =>
+      `<div><span class="${a.outcome === "failed" ? "fail" : "ok"}">■ ${esc(a.outcome)}</span> ${esc(a.summary)} <span class="path">— ${esc(a.dev)}</span>${a.reason ? `<div class="path">${esc(a.reason)}</div>` : ""}</div>`).join("") || `<span class="empty">no attempts yet</span>`}</div>
+    <div class="kv"><div class="k">Who knows it</div>${d.experts.map((x) =>
+      `<span class="dev" style="background:${devColor(x.dev)};margin-right:6px">${esc(x.dev)}</span>`).join("") || `<span class="empty">nobody yet</span>`}</div>
+    <div class="kv"><div class="k">Breaks if changed (${d.blast_radius.length})</div>
+      <div class="path">${d.blast_radius.map((b) => esc(short(b.caller)) + ` <span>(${b.distance})</span>`).join(", ") || "nothing calls this"}</div></div>`;
+}
+
+async function tick() {
+  try { await Promise.all([refreshGraph(), refreshFeed()]); } catch (e) { console.warn(e); }
+  setTimeout(tick, 1500);
+}
+tick();
+</script>
+</body>
+</html>

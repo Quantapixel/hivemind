@@ -6,7 +6,7 @@ readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
     "falkordb>=1.0.10",
-    "mcp>=1.2.0",
+    "mcp>=2.3.0",
     "starlette>=0.40",
     "uvicorn>=0.30",
 ]

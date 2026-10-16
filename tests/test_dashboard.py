@@ -42,3 +42,16 @@ def test_database_outage_is_a_503_not_a_crash():
     assert c.get("/").status_code == 200
     r = c.get("/api/teams", headers={"authorization": "Bearer " + "k" * 10})
     assert r.status_code == 503 and "unreachable" in r.json()["error"]
+
+
+def test_join_hands_over_the_connection_only_with_the_code(team):
+    s = Settings(team=team, url="redis://default:dbpass@db.example:1234")
+    c = TestClient(create_app(s, access_key="k" * 10, allowed_teams=[team], allow_join=True))
+    assert c.get("/api/join").status_code == 401
+    r = c.get("/api/join", headers={"authorization": "Bearer " + "k" * 10})
+    assert r.json() == {"url": "redis://default:dbpass@db.example:1234", "team": team, "teams": [team]}
+
+
+def test_join_is_off_for_local_dashboards(team):
+    c = TestClient(create_app(Settings(team=team)))
+    assert c.get("/api/join").status_code == 404

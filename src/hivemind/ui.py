@@ -336,7 +336,12 @@ def memory(teams: Teams, team: str) -> dict:
     }
 
 
-def create_app(settings: Settings, access_key: str | None = None, allowed_teams: list[str] | None = None) -> Starlette:
+def create_app(
+    settings: Settings,
+    access_key: str | None = None,
+    allowed_teams: list[str] | None = None,
+    allow_join: bool = False,
+) -> Starlette:
     teams = Teams(settings, allowed_teams)
 
     def team_of(request: Request) -> str:
@@ -360,6 +365,19 @@ def create_app(settings: Settings, access_key: str | None = None, allowed_teams:
 
     async def api_memory(request: Request) -> JSONResponse:
         return JSONResponse(memory(teams, team_of(request)))
+
+    async def api_join(_: Request) -> JSONResponse:
+        """`hivemind join` exchanges the team access code for the database
+        connection, so teammates never copy the database password around."""
+        if not (allow_join and access_key):
+            return JSONResponse({"error": "joining is not enabled on this dashboard"}, status_code=404)
+        url = settings.url or (
+            f"redis://{settings.username or 'default'}:{settings.password}@{settings.host}:{settings.port}"
+            if settings.password
+            else f"redis://{settings.host}:{settings.port}"
+        )
+        names = teams.allowed or [settings.team]
+        return JSONResponse({"url": url, "team": names[0], "teams": names})
 
     async def api_write(request: Request) -> JSONResponse:
         body = await request.json()
@@ -408,6 +426,7 @@ def create_app(settings: Settings, access_key: str | None = None, allowed_teams:
             Route("/api/function", api_function),
             Route("/api/path", api_path),
             Route("/api/memory", api_memory),
+            Route("/api/join", api_join),
             Route("/api/{kind}", api_write, methods=["POST"]),
             Mount("/static", StaticFiles(directory=STATIC)),
         ]
@@ -424,7 +443,8 @@ def app_from_env() -> Starlette:
     settings = Settings.from_env()
     if allowed:
         settings.team = allowed[0]
-    return create_app(settings, access_key=key, allowed_teams=allowed)
+    allow_join = os.environ.get("HIVEMIND_ALLOW_JOIN", "1") != "0"
+    return create_app(settings, access_key=key, allowed_teams=allowed, allow_join=allow_join)
 
 
 def run(settings: Settings, host: str = "127.0.0.1", port: int = 8765, access_key: str | None = None) -> None:

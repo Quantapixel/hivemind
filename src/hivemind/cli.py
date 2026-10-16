@@ -51,8 +51,12 @@ def cmd_init(args: argparse.Namespace) -> None:
     from .project import default_dev
     from .setup import init
 
+    from .onboard import detect_agents
+
     s = _settings(args)
-    agents = [a.strip() for a in args.agent.split(",") if a.strip()]
+    agents = detect_agents() if args.agent == "auto" else [a.strip() for a in args.agent.split(",") if a.strip()]
+    if not agents:
+        sys.exit("No coding agent found (claude, kiro-cli or codex). Install one, or pass --agent.")
     for line in init(Path(args.path), s, agents):
         print(f"  {line}")
     if not args.no_index:
@@ -104,16 +108,44 @@ def cmd_connect(args: argparse.Namespace) -> None:
 
 
 def cmd_invite(args: argparse.Namespace) -> None:
-    from .db import load_user_config
+    from .db import load_user_config, user_config_path
 
     cfg = load_user_config()
+    hosted = user_config_path().with_name("dashboard.json")
+    dash = json.loads(hosted.read_text()) if hosted.exists() else {}
+    url = dash.get("url") or cfg.get("dashboard")
+    code = dash.get("access_code") or cfg.get("access_code")
+    if url and code:
+        print("Send this to your teammate (privately: the access code opens the team's memory):\n")
+        print("  1. Install uv (skip if you have it):")
+        print("       curl -LsSf https://astral.sh/uv/install.sh | sh")
+        print("  2. Install Hivemind:")
+        print("       uv tool install git+https://github.com/Quantapixel/memofull")
+        print("  3. In your clone of our project:")
+        print(f"       hivemind join {url}")
+        print(f"     Access code: {code}")
+        print(f"\n  Dashboard: {url}")
+        return
     if not cfg.get("url"):
         sys.exit("Not connected to a hosted database yet. Run `hivemind connect <url> --team <name>` first.")
     team = args.team or cfg.get("team", "demo")
-    print("Send this to your teammate privately (it contains the database password):\n")
-    print("  git clone https://github.com/Quantapixel/memofull ~/memofull && cd ~/memofull && uv sync")
-    print(f"  uv run --project ~/memofull hivemind --team {team} connect '{cfg['url']}'")
-    print("  cd <your clone of the project> && uv run --project ~/memofull hivemind init . --agent claude   # or kiro, codex")
+    print("No dashboard deployed yet, so share the database directly (privately: it contains the password):\n")
+    print("  uv tool install git+https://github.com/Quantapixel/memofull")
+    print(f"  hivemind --team {team} connect '{cfg['url']}'")
+    print("  cd <your clone of the project> && hivemind init .")
+
+
+def cmd_join(args: argparse.Namespace) -> None:
+    from .onboard import join
+
+    agents = [a.strip() for a in args.agent.split(",") if a.strip()] if args.agent else None
+    join(args.dashboard, args.code, Path(args.path).resolve(), agents, index=not args.no_index)
+
+
+def cmd_doctor(args: argparse.Namespace) -> None:
+    from .onboard import doctor
+
+    sys.exit(doctor(Path(args.path).resolve()))
 
 
 def cmd_status(args: argparse.Namespace) -> None:
@@ -152,7 +184,7 @@ def main(argv: list[str] | None = None) -> None:
 
     p = sub.add_parser("init", help="connect a repo's coding agents to the team brain and index it")
     p.add_argument("path", nargs="?", default=".")
-    p.add_argument("--agent", default="claude", help="comma-separated: claude, codex, kiro (default claude)")
+    p.add_argument("--agent", default="auto", help="comma-separated: claude, codex, kiro (default: every one installed)")
     p.add_argument("--no-index", action="store_true")
     p.set_defaults(func=cmd_init)
 
@@ -166,6 +198,18 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--agent", default="watch", help="label for edits, e.g. cursor")
     p.add_argument("--interval", type=float, default=1.0)
     p.set_defaults(func=cmd_watch)
+
+    p = sub.add_parser("join", help="join a team: give the dashboard URL, enter its access code, done")
+    p.add_argument("dashboard", help="the team dashboard URL, e.g. https://hivemind-dashboard-five.vercel.app")
+    p.add_argument("--code", help="the access code (asked for if not given)")
+    p.add_argument("--path", default=".", help="your clone of the team's project (default: current folder)")
+    p.add_argument("--agent", help="comma-separated: claude, kiro, codex (default: every one installed)")
+    p.add_argument("--no-index", action="store_true")
+    p.set_defaults(func=cmd_join)
+
+    p = sub.add_parser("doctor", help="check the setup and say what to fix")
+    p.add_argument("path", nargs="?", default=".")
+    p.set_defaults(func=cmd_doctor)
 
     p = sub.add_parser("connect", help="save a hosted FalkorDB URL (redis:// or rediss://) for this user")
     p.add_argument("url")

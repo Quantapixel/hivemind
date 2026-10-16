@@ -40,6 +40,12 @@ def cmd_ui(args: argparse.Namespace) -> None:
     run(_settings(args), host=args.host, port=args.port)
 
 
+def cmd_demo(args: argparse.Namespace) -> None:
+    from .demo import run
+
+    run(_settings(args), pause=args.pause, step=args.step)
+
+
 def cmd_status(args: argparse.Namespace) -> None:
     from .brain import Brain
 
@@ -68,6 +74,11 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--host", default="127.0.0.1")
     p.add_argument("--port", type=int, default=8765)
     p.set_defaults(func=cmd_ui)
+
+    p = sub.add_parser("demo", help="play a three-developer scenario (wipes the team graph)")
+    p.add_argument("--pause", type=float, default=2.5, help="seconds between beats")
+    p.add_argument("--step", action="store_true", help="wait for enter between beats")
+    p.set_defaults(func=cmd_demo)
 
     p = sub.add_parser("status", help="print open tasks")
     p.set_defaults(func=cmd_status)

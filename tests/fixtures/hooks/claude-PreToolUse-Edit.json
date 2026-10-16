@@ -1,0 +1,19 @@
+{
+ "raw": {
+  "cwd": "/repo",
+  "session_id": "claude-session-1",
+  "permission_mode": "acceptEdits",
+  "effort": "low",
+  "prompt_id": "p1",
+  "hook_event_name": "PreToolUse",
+  "tool_name": "Edit",
+  "tool_use_id": "t1",
+  "tool_input": {
+   "file_path": "/repo/calc.py",
+   "old_string": "def add(a, b):\n    return a + b",
+   "new_string": "def add(a, b):\n    return a + b\n\ndef mul(a, b):\n    return a * b",
+   "replace_all": false
+  }
+ },
+ "note": "reconstructed from a captured Claude Code payload (keys and values as observed)"
+}

@@ -1,0 +1,22 @@
+{
+ "raw": {
+  "hook_event_name": "preToolUse",
+  "cwd": "/repo",
+  "tool_name": "fs_read",
+  "tool_input": {
+   "operations": [
+    {
+     "mode": "Line",
+     "path": "/repo/calc.py"
+    },
+    {
+     "mode": "Line",
+     "path": "/repo/test_calc.py"
+    }
+   ]
+  }
+ },
+ "env": {
+  "KIRO_SESSION_ID": "kiro-session-1"
+ }
+}

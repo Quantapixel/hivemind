@@ -1,0 +1,28 @@
+{
+ "raw": {
+  "hook_event_name": "postToolUse",
+  "cwd": "/repo",
+  "tool_name": "fs_read",
+  "tool_input": {
+   "operations": [
+    {
+     "mode": "Line",
+     "path": "/repo/calc.py"
+    },
+    {
+     "mode": "Line",
+     "path": "/repo/test_calc.py"
+    }
+   ]
+  },
+  "tool_response": {
+   "success": true,
+   "result": [
+    "=== Operation 1 Result (Text) ===\ndef add(a, b):\n    return a + b\n\n=== Operation 2 Result (Text) ===\nimport unittest\nfrom calc import add, mul\n\nclass T(unittest.TestCase):\n    def test_add(self):\n        self.assertEqual(add(2, 3), 5)\n    def test_mul(self):\n        self.assertEqual(mul(2, 3), 7)  # deliberately wrong\n\nif __name__ == \"__main__\":\n    unittest.main()"
+   ]
+  }
+ },
+ "env": {
+  "KIRO_SESSION_ID": "kiro-session-1"
+ }
+}

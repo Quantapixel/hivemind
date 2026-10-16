@@ -1,0 +1,9 @@
+{
+ "raw": {
+  "cwd": "/repo",
+  "session_id": "claude-session-1",
+  "hook_event_name": "SessionStart",
+  "source": "startup"
+ },
+ "note": "reconstructed from a captured Claude Code payload (keys and values as observed)"
+}

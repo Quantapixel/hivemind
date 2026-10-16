@@ -1,0 +1,10 @@
+{
+ "raw": {
+  "hook_event_name": "stop",
+  "cwd": "/repo",
+  "assistant_response": "`test_add` passed, `test_mul` failed \u2014 `mul(2, 3)` correctly returns `6` but the test expects `7` (deliberately wrong assertion in the test)."
+ },
+ "env": {
+  "KIRO_SESSION_ID": "kiro-session-1"
+ }
+}

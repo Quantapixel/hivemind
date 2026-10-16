@@ -1,0 +1,10 @@
+{
+ "raw": {
+  "hook_event_name": "agentSpawn",
+  "cwd": "/repo",
+  "prompt": "Add a function mul(a, b) that returns a * b to calc.py by editing the file, then run `python3 -m unittest test_calc -v` and tell me the result in one line. Do not modify test_calc.py."
+ },
+ "env": {
+  "KIRO_SESSION_ID": "kiro-session-1"
+ }
+}

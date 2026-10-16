@@ -1,0 +1,21 @@
+{
+ "raw": {
+  "hook_event_name": "PostToolUse",
+  "session_id": "codex-session-1",
+  "cwd": "/repo",
+  "tool_name": "Bash",
+  "tool_use_id": "c2",
+  "tool_input": {
+   "command": [
+    "bash",
+    "-lc",
+    "python3 -m unittest test_calc -v"
+   ]
+  },
+  "tool_response": {
+   "exit_code": 1,
+   "output": "FAIL: test_mul (test_calc.T.test_mul)\nAssertionError: 6 != 7\n\nFAILED (failures=1)"
+  }
+ },
+ "note": "ASSUMED shape: Codex hooks did not fire in non-interactive runs, so this follows its Claude-compatible event names"
+}

@@ -1,0 +1,21 @@
+{
+ "raw": {
+  "session_id": "f2b3f204-c842-49fd-b20e-ae5086a38a42",
+  "cwd": "/repo",
+  "prompt_id": "7761e1be-9e55-4a52-af76-2305c0811b60",
+  "permission_mode": "default",
+  "effort": {
+   "level": "medium"
+  },
+  "hook_event_name": "PostToolUseFailure",
+  "tool_name": "Bash",
+  "tool_input": {
+   "command": "python3 -m unittest test_calc -v",
+   "description": "Run unittest test_calc verbosely"
+  },
+  "tool_use_id": "toolu_013nY3qXGXarC14Gmisxi82T",
+  "error": "Exit code 1\ntest_calc (unittest.loader._FailedTest.test_calc) ... ERROR\n\n======================================================================\nERROR: test_calc (unittest.loader._FailedTest.test_calc)\n----------------------------------------------------------------------\nImportError: Failed to import test module: test_calc\nTraceback (most recent call last):\n  File \"/usr/lib64/python3.14/unittest/loader.py\", line 141, in loadTestsFromName\n    module = __import__(module_name)\n  File \"/repo/test_calc.py\", line 2, in <module>\n    from calc import add, mul\nImportError: cannot import name 'mul' from 'calc' (/repo/calc.py)\n\n\n----------------------------------------------------------------------\nRan 1 test in 0.000s\n\nFAILED (errors=1)",
+  "is_interrupt": false,
+  "duration_ms": 577
+ }
+}

@@ -1,0 +1,24 @@
+{
+ "raw": {
+  "hook_event_name": "postToolUse",
+  "cwd": "/repo",
+  "tool_name": "execute_bash",
+  "tool_input": {
+   "command": "python3 -m unittest test_calc -v 2>&1",
+   "working_dir": "/repo"
+  },
+  "tool_response": {
+   "success": true,
+   "result": [
+    {
+     "exit_status": "1",
+     "stdout": "test_add (test_calc.T.test_add) ... ok\ntest_mul (test_calc.T.test_mul) ... FAIL\n\n======================================================================\nFAIL: test_mul (test_calc.T.test_mul)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"/repo/test_calc.py\", line 8, in test_mul\n    self.assertEqual(mul(2, 3), 7)  # deliberately wrong\n    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^\nAssertionError: 6 != 7\n\n----------------------------------------------------------------------\nRan 2 tests in 0.001s\n\nFAILED (failures=1)\n",
+     "stderr": ""
+    }
+   ]
+  }
+ },
+ "env": {
+  "KIRO_SESSION_ID": "kiro-session-1"
+ }
+}

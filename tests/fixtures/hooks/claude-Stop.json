@@ -1,0 +1,15 @@
+{
+ "raw": {
+  "cwd": "/repo",
+  "session_id": "claude-session-1",
+  "permission_mode": "acceptEdits",
+  "effort": "low",
+  "prompt_id": "p1",
+  "hook_event_name": "Stop",
+  "stop_hook_active": false,
+  "last_assistant_message": "Added mul(a, b) to calc.py; test_mul fails because the test expects 7.",
+  "background_tasks": [],
+  "session_crons": []
+ },
+ "note": "reconstructed from a captured Claude Code payload (keys and values as observed)"
+}

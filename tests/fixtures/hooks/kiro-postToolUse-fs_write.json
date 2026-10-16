@@ -1,0 +1,21 @@
+{
+ "raw": {
+  "hook_event_name": "postToolUse",
+  "cwd": "/repo",
+  "tool_name": "fs_write",
+  "tool_input": {
+   "command": "append",
+   "path": "/repo/calc.py",
+   "new_str": "\ndef mul(a, b):\n    return a * b\n"
+  },
+  "tool_response": {
+   "success": true,
+   "result": [
+    ""
+   ]
+  }
+ },
+ "env": {
+  "KIRO_SESSION_ID": "kiro-session-1"
+ }
+}

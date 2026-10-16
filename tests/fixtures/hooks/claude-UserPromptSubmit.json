@@ -1,0 +1,12 @@
+{
+ "raw": {
+  "cwd": "/repo",
+  "session_id": "claude-session-1",
+  "permission_mode": "acceptEdits",
+  "effort": "low",
+  "prompt_id": "p1",
+  "hook_event_name": "UserPromptSubmit",
+  "prompt": "Add a function mul(a, b) to calc.py"
+ },
+ "note": "reconstructed from a captured Claude Code payload (keys and values as observed)"
+}

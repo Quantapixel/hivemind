@@ -147,10 +147,16 @@ def init_codex(repo: Path, codex_home: Path | None = None) -> list[str]:
     text = cfg.read_text() if cfg.exists() else ""
     if text:
         shutil.copy(cfg, cfg.with_name("config.toml.hivemind-backup"))
+    # Hivemind's tools only read and write the team graph, so let Codex call
+    # them without a prompt (otherwise `codex exec` rejects every call).
+    header = "[mcp_servers.hivemind]"
+    if header in text and "default_tools_approval_mode" not in text.split(header, 1)[1].split("\n[", 1)[0]:
+        text = text.replace(header, header + '\ndefault_tools_approval_mode = "approve"', 1)
+        done.append("codex mcp: hivemind tools pre-approved")
     text = re.sub(re.escape(CODEX_BEGIN) + r".*?" + re.escape(CODEX_END) + r"\n?", "", text, flags=re.S)
     cfg.parent.mkdir(parents=True, exist_ok=True)
     cfg.write_text(text.rstrip() + "\n\n" + codex_hooks_block())
-    done.append(f"{cfg}: hooks block (Codex asks you to trust it on first run)")
+    done.append(f"{cfg}: hooks block (approve it when Codex asks; until then run `hivemind watch`)")
     if _append_protocol(repo / "AGENTS.md"):
         done.append("AGENTS.md: coordination protocol")
     return done

@@ -45,7 +45,7 @@ def _notify(title: str, body: str) -> None:
 def run(root: Path, settings: Settings, agent: str = "watch", interval: float = 1.0) -> None:
     brain = Brain(connect(settings), settings.dev, agent)
     brain.attach_session(f"{agent}-{socket.gethostname()}-{os.getpid()}")
-    print(f"Watching {root} as {settings.dev} (team '{settings.team}'). Ctrl+C to stop.")
+    print(f"Watching {root} as {settings.dev} (team '{settings.team}'). Ctrl+C to stop.", flush=True)
     seen = _snapshot(root)
     while True:
         time.sleep(interval)
@@ -58,9 +58,9 @@ def run(root: Path, settings: Settings, agent: str = "watch", interval: float = 
                 continue
             out = brain.record_change(rel, diff, "watch")
             names = ", ".join(q.split("::")[-1] for q in out["changed"]) or "(removed code)"
-            print(f"{DIM}{time.strftime('%H:%M:%S')}{RESET} {rel}: {names}")
+            print(f"{DIM}{time.strftime('%H:%M:%S')}{RESET} {rel}: {names}", flush=True)
             for c in out["conflicts"]:
                 path = " -> ".join(p.split("::")[-1] for p in c["path"])
                 msg = f"{c['other_dev']} is on \"{c['other_intent']}\": {path}"
-                print(f"  {RED}conflict{RESET} {msg}")
+                print(f"  {RED}conflict{RESET} {msg}", flush=True)
                 _notify("Hivemind: connected work", msg)

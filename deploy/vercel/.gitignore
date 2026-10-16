@@ -1,2 +1,4 @@
 hivemind/
 .vercel/
+.vercel
+.env*

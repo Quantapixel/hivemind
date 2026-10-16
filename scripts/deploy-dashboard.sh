@@ -14,4 +14,6 @@ for name in FALKORDB_URL HIVEMIND_DASHBOARD_KEY HIVEMIND_TEAMS; do
   vercel env rm "$name" production --yes >/dev/null 2>&1 || true
   if [ -n "${!name:-}" ]; then printf '%s' "${!name}" | vercel env add "$name" production >/dev/null; fi
 done
+# Functions run in the region set in vercel.json ("regions"); keep it next to the
+# database (bom1 = Mumbai for an ap-south-1 instance) or every refresh crosses the world.
 vercel deploy --prod --yes

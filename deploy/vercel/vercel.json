@@ -1,7 +1,18 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
+  "regions": [
+    "bom1"
+  ],
   "functions": {
-    "api/index.py": { "includeFiles": "hivemind/**", "maxDuration": 30 }
+    "api/index.py": {
+      "includeFiles": "hivemind/**",
+      "maxDuration": 30
+    }
   },
-  "rewrites": [{ "source": "/(.*)", "destination": "/api/index" }]
+  "rewrites": [
+    {
+      "source": "/(.*)",
+      "destination": "/api/index?__path=$1"
+    }
+  ]
 }

@@ -12,6 +12,65 @@ Hivemind puts every agent on one graph. It holds the code's call graph, who is c
 
 ![live view](docs/live-view.png)
 
+## Get started
+
+### Join a team (3 steps)
+
+Your teammate sends you a **dashboard link** and an **access code** (they run `hivemind invite` to get both). You'll also need the team's project on your machine (`git clone` it) and a coding agent: **Claude Code**, **Kiro CLI** or **Codex CLI**, logged in to your own account. Works on macOS and Linux; on Windows, use WSL.
+
+```bash
+# 1. Install uv (skip if you have it), then open a new terminal
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# 2. Install Hivemind
+uv tool install git+https://github.com/Quantapixel/memofull
+
+# 3. Inside your clone of the team's project
+hivemind join https://your-team-dashboard.vercel.app
+#    Team access code: ********
+```
+
+`join` connects you to the team database, uses your git name (or asks for one), finds every coding agent you have installed, connects them to this project and indexes the code. Then start your agent in that folder and work as usual:
+
+| Agent | Start it with | Notes |
+|---|---|---|
+| Claude Code | `claude` | Approve the **hivemind** MCP server when asked |
+| Kiro | `kiro-cli chat --agent hivemind` | |
+| Codex | `codex` | Approve the Hivemind hooks when asked; until you do, keep `hivemind watch .` running in a second terminal |
+
+Open the dashboard link and enter the same access code to see the team live.
+
+**Something not working?** Run `hivemind doctor` in the project folder. It checks every piece and prints the fix for anything that's wrong.
+
+| Problem | Fix |
+|---|---|
+| `That access code was not accepted` | Ask your teammate for the current code |
+| `Could not reach` the database | A free FalkorDB Cloud instance sleeps after a day without use; whoever runs the team wakes it in the FalkorDB console |
+| You show up under the wrong name | `git config --global user.name "Your Name"`, then `hivemind join` again |
+| `not inside a git repository` | `cd` into your clone of the project first |
+| `hivemind: command not found` | Open a new terminal after installing, or run `uv tool update-shell` |
+
+**What gets shared:** only work inside that project folder: your prompts, your agent's summaries, which functions changed and test results. Your code itself is never uploaded, only function names and how they call each other.
+
+### Start a team (about 15 minutes, once)
+
+1. **A database everyone can reach.** Create a free instance on [FalkorDB Cloud](https://app.falkordb.cloud/signup): pick a region near your team and set a password made of letters and numbers. Free instances sleep after a day unused, are deleted after 7 days, and don't use TLS: fine for trying it out; use a paid tier or your own server for real work (Hivemind supports `rediss://` URLs).
+2. **Install and connect:**
+   ```bash
+   uv tool install git+https://github.com/Quantapixel/memofull
+   hivemind --team myteam connect 'redis://falkordb:PASSWORD@HOST:PORT'
+   ```
+   The URL is saved privately to `~/.config/hivemind/config.json`, never to the repo.
+3. **Connect your project:** `cd your-project && hivemind init .`
+4. **Host the dashboard on Vercel** (needs the [Vercel CLI](https://vercel.com/docs/cli), logged in). From a clone of this repo:
+   ```bash
+   FALKORDB_URL='redis://falkordb:PASSWORD@HOST:PORT' \
+   HIVEMIND_DASHBOARD_KEY="$(openssl rand -base64 12)" HIVEMIND_TEAMS=myteam \
+   scripts/deploy-dashboard.sh
+   ```
+   Set `"regions"` in `deploy/vercel/vercel.json` next to your database (`bom1` for Mumbai, `iad1` for US East...), or every refresh crosses the world. If Vercel's own login wall blocks visitors, turn it off with `vercel project protection disable hivemind-dashboard --sso` (the dashboard has its own access code). The script saves the dashboard link and code privately so `invite` can print them.
+5. **Invite people:** `hivemind invite` prints the three steps above with your dashboard link and code. Send it privately, and give them access to the project repo.
+
 ## Why a graph
 
 Every question Hivemind answers is a question about connections:
@@ -129,41 +188,32 @@ Three "machines" (separate clones) shared one FalkorDB:
 
 Toggle layers (calls, work, memory, tests) and colour by file or by risk. Keyboard: <kbd>⌘K</kbd> search · <kbd>P</kbd> path · <kbd>F</kbd> fit · <kbd>D</kbd> decision · <kbd>Esc</kbd> clear. Dark and light themes, and it works on mobile.
 
-## Quickstart
-
-```bash
-# 1. FalkorDB (one per team; everyone points at it)
-docker compose up -d        # or: podman run -d -p 6379:6379 -p 3000:3000 docker.io/falkordb/falkordb
-
-# 2. Install
-uv sync
-
-# 3. Watch the demo: three developers, three agents, one brain
-uv run hivemind ui &        # http://127.0.0.1:8765 (⌘K to search)
-uv run hivemind demo        # --step to advance with enter
-```
-
-### Use it on your repo
-
-```bash
-export FALKORDB_HOST=<shared host>  HIVEMIND_TEAM=myteam
-uv run hivemind init /path/to/repo --agent claude,kiro,codex   # whichever you use
-cd /path/to/repo && claude                     # or: kiro-cli chat --agent hivemind / codex
-uv run hivemind watch /path/to/repo            # optional: capture edits from any other tool
-```
-
-Edits are indexed as they happen. Run `hivemind index` after pulling big changes.
+## Commands
 
 | Command | What it does |
 |---|---|
-| `hivemind init [path] --agent claude,kiro,codex` | Wire a repo's agents to the team brain and index it |
+| `hivemind join <dashboard-url>` | Join a team: asks for the access code, connects, wires up every agent you have installed, indexes the project |
+| `hivemind doctor` | Checks the database, the project, your name, each agent and the hooks; says what to fix |
+| `hivemind invite` | Prints the three steps to send a teammate |
+| `hivemind connect <url>` | Save a database URL privately (`~/.config/hivemind`), for whoever runs the team |
+| `hivemind init [path] [--agent claude,kiro,codex]` | Wire a repo's agents (default: all installed) and index it |
 | `hivemind watch [path]` | Record edits made by any tool, warn about conflicts |
-| `hivemind hook --agent X` | The hook entry point the agents call (installed by `init`) |
 | `hivemind index [path] [--reset]` | Index or re-index a Python repo |
-| `hivemind serve [--dev] [--agent]` | MCP server (stdio, SSE or streamable HTTP) |
-| `hivemind ui` | Live graph view |
-| `hivemind demo [--step]` | Scripted three-developer scenario (wipes the team graph) |
+| `hivemind ui` | Local live view (the hosted one is on Vercel) |
+| `hivemind demo [--step]` | Scripted three-developer scenario (wipes that team's graph) |
+| `hivemind serve`, `hivemind hook` | MCP server and hook entry point; `init` installs both, you never run them by hand |
 | `hivemind status` | Open tasks as JSON |
+
+## Try the demo locally
+
+No accounts needed: a local FalkorDB, the live view, and a scripted story with three developers.
+
+```bash
+git clone https://github.com/Quantapixel/memofull && cd memofull && uv sync
+docker compose up -d                # or: podman run -d -p 6379:6379 docker.io/falkordb/falkordb
+uv run hivemind ui &                # http://127.0.0.1:8765 (⌘K to search)
+uv run hivemind demo --step         # press Enter to advance
+```
 
 ## The demo scenario
 

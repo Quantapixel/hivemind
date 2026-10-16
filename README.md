@@ -73,7 +73,18 @@ Hivemind: a teammate is working on code connected to this edit.
   Replaced HMAC check with PyJWT decode (test_refresh_session fails: old tokens rejected).
 ```
 
-**3. A live view.** `hivemind ui` shows the team graph as it changes. Each developer's claims get a ring in their colour, and conflict paths animate in red. Click any function to see why it is the way it is, who knows it, and what breaks if it changes.
+**3. A live view for the humans.** `hivemind ui` shows the team graph as it changes, and lets people add to it:
+
+| | |
+|---|---|
+| **Conflicts and work** | Each developer's claims ringed in their colour, and conflict paths animated in red with the exact call direction (`validate_token ← current_user ← checkout`). Focus on one developer to see only their work. |
+| **Inspector** | Click a function to see its decisions, an attempt timeline, its impact grouped by hop, callers and callees, and who knows it. Its blast radius lights up on the graph. |
+| **Path finder** | "How is A connected to B?" Uses FalkorDB `shortestPath`; if there's no direct chain, it finds the closest shared caller. |
+| **Hotspots** | Functions ranked by FalkorDB's `algo.pageRank` (core code) or `algo.betweenness` (chokepoints that many call paths run through). |
+| **Memory browser** | Search every decision, attempt and convention. Add decisions and conventions from the UI, so humans teach the agents too. |
+| **Housekeeping** | Release stale tasks, switch between team graphs, filter the activity feed by person, and share links with `?team=&fn=`. |
+
+Keyboard: <kbd>⌘K</kbd> search · <kbd>P</kbd> path · <kbd>F</kbd> fit · <kbd>D</kbd> decision · <kbd>Esc</kbd> clear. Dark and light themes, and it works on mobile.
 
 ## Quickstart
 
@@ -85,7 +96,7 @@ docker compose up -d        # or: podman run -d -p 6379:6379 -p 3000:3000 docker
 uv sync
 
 # 3. Watch the demo: three developers, three agents, one brain
-uv run hivemind ui &        # http://127.0.0.1:8765
+uv run hivemind ui &        # http://127.0.0.1:8765 (⌘K to search)
 uv run hivemind demo        # --step to advance with enter
 ```
 

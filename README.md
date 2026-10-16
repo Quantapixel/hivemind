@@ -10,6 +10,8 @@ Hivemind puts every agent on one graph. It holds the code's call graph, who is c
 - **Memory of what failed, captured automatically.** When an agent changes code and the tests fail, that failure is attached to the exact functions it changed. It reaches the next agent that touches that function *or anything that calls it*, on any machine, in any later session, whichever agent that developer uses. When a later change makes the tests pass, the failure is marked fixed, along with the fix.
 - **Clean handoffs.** Alice's agent stops mid-task, and Bob's agent resumes it the next morning with every session, attempt and note.
 
+**▶ Live demo: [hivemind-live-demo.vercel.app](https://hivemind-live-demo.vercel.app)**. Press **Play** to watch five developers using Claude Code, Kiro and Codex work on one project through the shared memory: conflicts caught before anyone writes code, a failure that two attempts hit and that gets merged, a handoff, a fix that resolves the failure, and a decision that supersedes an older one. No sign-up needed.
+
 ![live view](docs/live-view.png)
 
 ## Get started
@@ -203,6 +205,16 @@ Toggle layers (calls, work, memory, tests) and colour by file or by risk. Keyboa
 | `hivemind demo [--step]` | Scripted three-developer scenario (wipes that team's graph) |
 | `hivemind serve`, `hivemind hook` | MCP server and hook entry point; `init` installs both, you never run them by hand |
 | `hivemind status` | Open tasks as JSON |
+
+## Host a public demo
+
+The live demo is the same dashboard in public mode: no access code, limited to the teams you name, and it never hands out the database connection. It plays the scripted story from `src/hivemind/simulation.py` one step per click, with each step writing to its own `simulation` team graph through the same calls that agents' hooks make.
+
+```bash
+FALKORDB_URL='redis://...' HIVEMIND_PUBLIC=1 HIVEMIND_TEAMS=simulation HIVEMIND_SIM_TEAM=simulation \
+VERCEL_PROJECT=hivemind-live-demo scripts/deploy-dashboard.sh
+vercel project protection disable hivemind-live-demo --sso   # if Vercel asks visitors to log in
+```
 
 ## Try the demo locally
 

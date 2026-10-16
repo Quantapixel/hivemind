@@ -23,7 +23,7 @@ import sys
 from pathlib import Path
 
 from .brain import Brain
-from .capture import HookEvent, is_test_command, normalize, parse_failure
+from .capture import HookEvent, is_test_command, normalize, parse_failure, test_outcome
 from .db import connect
 from .indexer import index_file
 from .project import find_root, load_settings, session_file
@@ -125,9 +125,11 @@ def on_post_edit(brain: Brain, ev: HookEvent, root: Path) -> None:
 
 
 def on_post_shell(brain: Brain, ev: HookEvent) -> None:
-    if ev.exit_code is None or not is_test_command(ev.command):
+    if not is_test_command(ev.command):
         return
-    passed = ev.exit_code == 0
+    passed = test_outcome(ev.command, ev.exit_code, ev.output)
+    if passed is None:
+        return
     summary, signature = ("", "") if passed else parse_failure(ev.output)
     brain.record_test_run(ev.command, passed, summary, signature)
 

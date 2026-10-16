@@ -192,3 +192,21 @@ def parse_failure(output: str) -> tuple[str, str]:
     shown = ", ".join(names[:3]) + (f" +{len(names) - 3}" if len(names) > 3 else "")
     summary = (f"{shown} failed" if names else "tests failed") + (f": {err[:200]}" if err else "")
     return summary, "|".join(sorted(names))[:400]
+
+
+_PASS_MARKERS = re.compile(r"^(?:OK(?: \(.*\))?|=+ .*\bpassed\b.*=+|ok\s+\S+.*|test result: ok\..*|Tests:\s+\d+ passed.*)$", re.M)
+_FAIL_MARKERS = re.compile(r"^(?:FAILED(?: \(.*\))?|=+ .*\bfailed\b.*=+|FAIL\b.*|--- FAIL:.*|test result: FAILED\..*|Tests:.*\d+ failed.*)$", re.M)
+
+
+def test_outcome(command: str, exit_code: int | None, output: str) -> bool | None:
+    """Did a test command pass? Exit codes lie when output is piped
+    (`pytest | tail` reports tail's status), so piped runs are judged by
+    the test runner's own summary line. None when it cannot tell."""
+    piped = bool(re.search(r"(?<![|])\|(?![|])", command)) and "pipefail" not in command
+    if not piped and exit_code is not None:
+        return exit_code == 0
+    if _FAIL_MARKERS.search(output or ""):
+        return False
+    if _PASS_MARKERS.search(output or ""):
+        return True
+    return None if piped else (exit_code == 0 if exit_code is not None else None)

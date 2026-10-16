@@ -68,3 +68,19 @@ def test_parse_failure_unittest_and_pytest():
     out = "FAILED tests/test_a.py::test_x - AssertionError: boom\nFAILED tests/test_a.py::test_y - KeyError: 'k'\n"
     summary, sig = parse_failure(out)
     assert sig == "tests/test_a.py::test_x|tests/test_a.py::test_y" and summary.startswith("tests/test_a.py::test_x, tests/test_a.py::test_y failed")
+
+
+@pytest.mark.parametrize("cmd,code,out,expected", [
+    ("pytest -q", 1, "", False),
+    ("pytest -q", 0, "", True),
+    ("python3 -m unittest discover 2>&1 | tail -15", 0, "Ran 11 tests\n\nOK\n", True),
+    ("python3 -m unittest discover 2>&1 | tail -15", 0, "Ran 11 tests\n\nFAILED (failures=1)\n", False),
+    ("pytest | tail -3", 0, "===== 2 failed, 9 passed in 0.3s =====", False),
+    ("pytest | tail -3", 0, "===== 11 passed in 0.3s =====", True),
+    ("go test ./... | tee log", 0, "--- FAIL: TestX (0.00s)\nFAIL\n", False),
+    ("pytest | grep x", 0, "", None),
+    ("set -o pipefail; pytest | tail", 1, "", False),
+])
+def test_outcome_handles_pipes(cmd, code, out, expected):
+    from hivemind.capture import test_outcome
+    assert test_outcome(cmd, code, out) is expected

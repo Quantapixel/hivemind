@@ -181,9 +181,17 @@ class Brain:
             return
         sid = self._session()
         self.q("MATCH (s:Session {id: $sid}) SET s.progress = $m, s.progress_ts = $ts", sid=sid, m=message[:2000], ts=_now())
-        iid = self.session_intent()
-        if iid:
-            self.q("MATCH (i:Intent {id: $iid}) SET i.progress = $m, i.progress_ts = $ts", iid=iid, m=message[:2000], ts=_now())
+        # The latest task of this session, even if the agent already closed it.
+        self.q(
+            """
+            MATCH (:Session {id: $sid})-[:WORKS_ON]->(i:Intent)
+            WITH i ORDER BY i.created DESC LIMIT 1
+            SET i.progress = $m, i.progress_ts = $ts
+            """,
+            sid=sid,
+            m=message[:2000],
+            ts=_now(),
+        )
 
     def functions_in_lines(self, path: str, start: int, end: int) -> list[str]:
         return [

@@ -38,6 +38,8 @@
   .card .who { font-weight: 600; }
   .path { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11.5px; color: var(--muted); margin-top: 5px; word-break: break-word; }
   .path b { color: var(--text); font-weight: 500; }
+  .clamp { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; cursor: pointer; }
+  .clamp.full { -webkit-line-clamp: unset; }
   .tag { display: inline-block; font-size: 10.5px; padding: 1px 7px; border-radius: 4px; margin-left: 6px; vertical-align: 1px; }
   .tag.direct { background: var(--red); color: #fff; }
   .tag.nearby { background: rgba(255,179,71,.2); color: var(--amber); }
@@ -103,7 +105,9 @@ let onPath = new Set();        // function ids on a conflict path
 let lastSig = "";
 
 const el = document.getElementById("canvas");
+// Keep the whole graph in view until the viewer zooms or drags themselves.
 let fitted = false;
+["wheel", "pointerdown"].forEach((t) => el.addEventListener(t, () => { fitted = true; }, { passive: true }));
 const Graph = ForceGraph()(el)
   .backgroundColor("#0d1017")
   .nodeId("id")
@@ -127,10 +131,13 @@ const Graph = ForceGraph()(el)
   .nodePointerAreaPaint((n, color, ctx) => { ctx.fillStyle = color; ctx.beginPath(); ctx.arc(n.x, n.y, 8, 0, 2 * Math.PI); ctx.fill(); })
   .onNodeClick((n) => n.kind === "function" && showDetail(n.id))
   .cooldownTicks(150)
-  .onEngineStop(() => { if (!fitted) { fitted = true; Graph.zoomToFit(500, 70); } });
+  .onEngineStop(() => { if (!fitted) Graph.zoomToFit(400, 70); });
 Graph.d3Force("charge").strength(-110);
 Graph.d3Force("link").distance((l) => l.kind === "calls" ? 34 : 22);
-new ResizeObserver(() => Graph.width(el.clientWidth).height(el.clientHeight)).observe(el);
+new ResizeObserver(() => {
+  Graph.width(el.clientWidth).height(el.clientHeight);
+  if (!fitted) Graph.zoomToFit(0, 70);
+}).observe(el);
 
 function linkIds(l) {
   const a = typeof l.source === "object" ? l.source.id : l.source;
@@ -200,7 +207,7 @@ async function refreshGraph() {
     const nodes = data.nodes.map((n) => Object.assign(known.get(n.id) || {}, n));
     known.clear(); nodes.forEach((n) => known.set(n.id, n));
     Graph.graphData({ nodes, links: data.links });
-    if (!fitted) setTimeout(() => { fitted = true; Graph.zoomToFit(500, 70); }, 1800);
+    [1500, 4000].forEach((ms) => setTimeout(() => { if (!fitted) Graph.zoomToFit(400, 70); }, ms));
   }
   document.getElementById("devs").innerHTML = data.devs
     .map((d) => `<span class="dev" style="background:${devColor(d)}">${esc(d)}</span>`).join("");
@@ -229,7 +236,7 @@ async function refreshFeed() {
       <span class="who" style="color:${devColor(t.dev)}">${esc(t.dev)}</span>
       <span class="tag ${t.status}">${t.status.replace("_", " ")}</span>
       <div>${esc(t.description)}</div>
-      ${t.handoff_note ? `<div class="path">handoff → ${esc(t.handoff_to || "anyone")}: ${esc(t.handoff_note)}</div>` : ""}
+      ${t.handoff_note ? `<div class="path clamp" onclick="this.classList.toggle('full')">handoff → ${esc(t.handoff_to || "anyone")}: ${esc(t.handoff_note)}</div>` : ""}
       <div class="path">${t.claimed.map((c) => esc(short(c))).join(", ")}</div>
     </div>`).join("") : `<div class="empty">No open tasks.</div>`;
   const first = seenEvents.size === 0;
@@ -265,6 +272,7 @@ async function tick() {
   setTimeout(tick, 1500);
 }
 tick();
+document.addEventListener("keydown", (e) => { if (e.key === "f") Graph.zoomToFit(400, 70); });
 </script>
 </body>
 </html>

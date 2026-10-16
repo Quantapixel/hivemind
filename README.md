@@ -5,7 +5,7 @@
 | | |
 |---|---|
 | **▶ Live demo** | **[hivemind-live-demo.vercel.app](https://hivemind-live-demo.vercel.app)**: press Play, no sign-up |
-| **Demo video** | DEMO_VIDEO_LINK |
+| **Demo video** | [Walkthrough of the live demo (2:49)](https://github.com/Quantapixel/memofull/releases/download/v1.0/hivemind-demo-walkthrough.mp4) |
 | **Track** | Agent Memory and Coordination (Track 02) |
 | **Built with** | FalkorDB Cloud · Python · MCP · Claude Code, Kiro and Codex hooks · Vercel |
 

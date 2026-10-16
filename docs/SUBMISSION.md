@@ -1,6 +1,6 @@
 # Graph Hacks submission: Hivemind
 
-Copy-paste answers for the submission form. Fill in the demo video link once it's uploaded.
+Copy-paste answers for the submission form. The video link points at a silent walkthrough; swap in the narrated recording if you make one.
 
 **Project name:** Hivemind
 
@@ -12,7 +12,7 @@ Copy-paste answers for the submission form. Fill in the demo video link once it'
 **Links**
 - Repository: https://github.com/Quantapixel/memofull
 - Live demo (public, press Play): https://hivemind-live-demo.vercel.app
-- Demo video: DEMO_VIDEO_LINK
+- Demo video: https://github.com/Quantapixel/memofull/releases/download/v1.0/hivemind-demo-walkthrough.mp4 (silent walkthrough; replace with the narrated video when it's recorded)
 - Setup instructions: README → *Get started*
 - Graph data model: README → *Graph data model*
 - Cypher queries and algorithms: README → *Cypher queries and graph algorithms it depends on*

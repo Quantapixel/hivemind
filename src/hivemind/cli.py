@@ -48,14 +48,20 @@ def cmd_demo(args: argparse.Namespace) -> None:
 
 def cmd_init(args: argparse.Namespace) -> None:
     from .indexer import index_repo
+    from .project import default_dev
     from .setup import init
 
     s = _settings(args)
-    for line in init(Path(args.path), s):
-        print(f"  wrote {line}")
+    agents = [a.strip() for a in args.agent.split(",") if a.strip()]
+    for line in init(Path(args.path), s, agents):
+        print(f"  {line}")
     if not args.no_index:
         print(f"  indexed {json.dumps(index_repo(connect(s), Path(args.path)))}")
-    print(f"Ready. Team graph '{s.team}' at {s.host}:{s.port}. Each developer sets HIVEMIND_DEV (default $USER).")
+    print(f"Ready. Team '{s.team}' at {s.host}:{s.port}. You are '{default_dev(args.path)}' (set HIVEMIND_DEV to change).")
+    if "kiro" in agents:
+        print("Kiro: start with `kiro-cli chat --agent hivemind`.")
+    if "codex" in agents:
+        print("Codex: approve the Hivemind hooks when Codex asks on first run.")
 
 
 def cmd_hook(args: argparse.Namespace) -> None:
@@ -65,7 +71,23 @@ def cmd_hook(args: argparse.Namespace) -> None:
         import os
 
         os.environ["HIVEMIND_TEAM"] = args.team
-    hook_main()
+    hook_main(args.agent)
+
+
+def cmd_watch(args: argparse.Namespace) -> None:
+    from .project import find_root, load_settings
+    from .watch import run
+
+    root = find_root(args.path)
+    if root is None:
+        sys.exit(f"{args.path} is not a Hivemind project; run `hivemind init` there first.")
+    s = load_settings(root)
+    if getattr(args, "dev", None):
+        s.dev = args.dev
+    try:
+        run(root, s, agent=args.agent, interval=args.interval)
+    except KeyboardInterrupt:
+        pass
 
 
 def cmd_status(args: argparse.Namespace) -> None:
@@ -102,13 +124,22 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--step", action="store_true", help="wait for enter between beats")
     p.set_defaults(func=cmd_demo)
 
-    p = sub.add_parser("init", help="connect a repo's Claude Code to the team brain and index it")
+    p = sub.add_parser("init", help="connect a repo's coding agents to the team brain and index it")
     p.add_argument("path", nargs="?", default=".")
+    p.add_argument("--agent", default="claude", help="comma-separated: claude, codex, kiro (default claude)")
     p.add_argument("--no-index", action="store_true")
     p.set_defaults(func=cmd_init)
 
-    p = sub.add_parser("hook", help="Claude Code hook entry point (reads the event on stdin)")
+    p = sub.add_parser("hook", help="agent hook entry point (reads the event on stdin)")
+    p.add_argument("--agent", default="claude", choices=["claude", "codex", "kiro"])
     p.set_defaults(func=cmd_hook)
+
+    p = sub.add_parser("watch", help="record edits made by any tool (for agents without hooks)")
+    p.add_argument("path", nargs="?", default=".")
+    p.add_argument("--dev", help="developer name (default $HIVEMIND_DEV or git user.name)")
+    p.add_argument("--agent", default="watch", help="label for edits, e.g. cursor")
+    p.add_argument("--interval", type=float, default=1.0)
+    p.set_defaults(func=cmd_watch)
 
     p = sub.add_parser("status", help="print open tasks")
     p.set_defaults(func=cmd_status)

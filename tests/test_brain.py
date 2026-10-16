@@ -114,22 +114,16 @@ def test_reindex_removes_deleted_functions(graph, tmp_path):
 
 
 def test_hook_resolves_edit_to_functions_and_warns_once(graph):
-    from hivemind.hooks import pre_tool_use
+    from hivemind.capture import Edit, HookEvent
+    from hivemind.hooks import on_pre_edit
 
     Brain(graph, "alice").start_task("jwt", ["validate_token"])
-    bob = Brain(graph, "bob", "claude-code")
-    bob.attach_session("cc-test")
-    event = {
-        "tool_name": "Edit",
-        "cwd": str(SHOPAPP),
-        "tool_input": {
-            "file_path": str(SHOPAPP / "shop" / "orders.py"),
-            "old_string": '    total = cart.cart_total(user["id"])',
-        },
-    }
-    first = pre_tool_use(bob, event, SHOPAPP)
-    assert first["hookSpecificOutput"]["permissionDecision"] == "deny"
-    assert "checkout -> current_user -> validate_token" in first["hookSpecificOutput"]["permissionDecisionReason"]
-    assert pre_tool_use(bob, event, SHOPAPP) is None  # acknowledged, retry goes through
+    bob = Brain(graph, "bob", "claude")
+    bob.attach_session("claude-test")
+    ev = HookEvent(agent="claude", kind="pre_tool", session_id="test", cwd=str(SHOPAPP), action="edit",
+                   edits=[Edit(str(SHOPAPP / "shop" / "orders.py"), '    total = cart.cart_total(user["id"])')])
+    reason = on_pre_edit(bob, ev, SHOPAPP)
+    assert "checkout -> current_user -> validate_token" in reason
+    assert on_pre_edit(bob, ev, SHOPAPP) is None  # acknowledged, retry goes through
     [task] = [t for t in bob.open_tasks() if t["dev"] == "bob"]
     assert task["claimed"] == ["shop/orders.py::checkout"]  # only the edited function

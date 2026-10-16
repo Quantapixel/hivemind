@@ -1,22 +1,21 @@
 """MCP server: exposes the team brain as tools to any coding agent
-(Claude Code, Cursor, Codex, ...). Each developer runs this locally over
-stdio, pointed at the team's shared FalkorDB."""
+(Claude Code, Codex, Kiro, ...). Each developer's agent launches it over
+stdio; it finds the project's .hivemind/config.json and the team's shared
+FalkorDB from there."""
 
 from __future__ import annotations
-
-import os
-from pathlib import Path
 
 from mcp.server.mcpserver import MCPServer
 
 from .brain import Brain
 from .db import Settings, connect
-from .hooks import read_session_hint
+from .project import default_dev, find_root, load_settings, read_session
 
 INSTRUCTIONS = """\
 Hivemind is the shared memory of every coding agent on this team. Other
 developers' agents are editing the same codebase right now, and they read
-what you write here. Follow this protocol:
+what you write here. Edits and test runs are captured automatically by
+hooks; the tools below are for what hooks cannot see. Follow this protocol:
 
 1. Before editing code, call `start_task` with what you intend to do and the
    functions or files you will touch. Read the conflicts and context it
@@ -76,10 +75,13 @@ def create_server(brain: Brain) -> MCPServer:
         return brain.record_attempt(targets, summary, outcome, reason, intent_id or None)
 
     @mcp.tool()
-    def record_decision(title: str, rationale: str, targets: list[str], source: str = "") -> dict:
+    def record_decision(title: str, rationale: str, targets: list[str], source: str = "", supersedes: str = "") -> dict:
         """Remember a design decision and the code it governs. `source` can be
-        a PR, issue or chat link."""
-        return brain.record_decision(title, rationale, targets, source)
+        a PR, issue or chat link. A decision that restates a current one on the
+        same code replaces it automatically; pass `supersedes` (a decision id)
+        to replace one explicitly. Returns other current decisions on that
+        code as `related`: check they still agree with this one."""
+        return brain.record_decision(title, rationale, targets, source, supersedes)
 
     @mcp.tool()
     def add_convention(rule: str, files: list[str] | None = None) -> dict:
@@ -129,10 +131,14 @@ def create_server(brain: Brain) -> MCPServer:
 
 
 def run(settings: Settings | None = None, agent: str = "agent", transport: str = "stdio") -> None:
+    root = find_root()
+    if root is not None:
+        settings = load_settings(root)
     settings = settings or Settings.from_env()
+    if root is None and settings.dev in ("", "anonymous"):
+        settings.dev = default_dev()
     brain = Brain(connect(settings), settings.dev, agent)
-    root = os.environ.get("HIVEMIND_ROOT")
-    if root:
-        # Share the session the Claude Code SessionStart hook recorded.
-        brain.session_hint = lambda: read_session_hint(Path(root))
+    if root is not None:
+        # Share the session the agent's SessionStart hook recorded.
+        brain.session_hint = lambda: read_session(root, agent)
     create_server(brain).run(transport=transport)

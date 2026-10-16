@@ -134,16 +134,25 @@ function setTheme(t) {
 }
 
 // ---------------------------------------------------------------- graph
+// The physics graph holds only functions and calls. Files are drawn as
+// regions behind their functions; tasks and memory are drawn onto the
+// functions they belong to, so nothing floats loose.
 const el = $("#canvas");
 let Graph = null;
 const known = new Map();
 let sig = "";
 let claimedBy = new Map();      // fn -> [dev]
+let tasksOn = new Map();        // fn -> [{dev, name, status}] anchored task tags
+let memOn = new Map();          // fn -> {failed, worked, decisions}
 let conflictEdges = new Set();  // "a|b"
 let conflictNodes = new Set();
 let neighbors = new Map();      // id -> Set(ids)
-let attached = new Map();       // function id -> Set(intent / attempt / decision ids)
 let fileColor = new Map();
+let fileOrder = [];
+
+const FS = 5.3;                 // label size in graph units: pills scale with zoom like a map
+const PILL_H = FS + 5.2;
+const PAD = 3.8;
 
 const linkKey = (l) => {
   const a = typeof l.source === "object" ? l.source.id : l.source;
@@ -152,23 +161,15 @@ const linkKey = (l) => {
 };
 const hasEdge = (set, l) => { const [a, b] = linkKey(l); return set.has(a + "|" + b) || set.has(b + "|" + a); };
 
-// Which nodes are "lit" right now; everything else is dimmed.
-// Add the tasks and memories attached to any lit function.
-function withAttached(set) {
-  for (const id of [...set]) (attached.get(id) || []).forEach((x) => set.add(x));
-  return set;
-}
 function litSet() {
-  if (S.path && S.path.path.length) return withAttached(new Set(S.path.path));
-  if (S.hover && S.hover.kind === "function") return withAttached(new Set([S.hover.id, ...(neighbors.get(S.hover.id) || [])]));
+  if (S.path && S.path.path.length) return new Set(S.path.path);
+  if (S.hover) return new Set([S.hover.id, ...(neighbors.get(S.hover.id) || [])]);
   if (S.selected && S.detail) {
-    return withAttached(new Set([S.selected, ...S.detail.blast_radius.map((b) => b.caller), ...S.detail.callees,
-      ...(neighbors.get(S.selected) || [])]));
+    return new Set([S.selected, ...S.detail.blast_radius.map((b) => b.caller), ...S.detail.callees]);
   }
   if (S.focusDev) {
     const s = new Set();
     for (const [fn, devs] of claimedBy) if (devs.includes(S.focusDev)) { s.add(fn); (neighbors.get(fn) || []).forEach((n) => s.add(n)); }
-    for (const n of known.values()) if (n.dev === S.focusDev) s.add(n.id);
     return s;
   }
   return null;
@@ -177,149 +178,262 @@ let LIT = null;
 let BLAST = new Map();  // fn -> distance from selected
 let PATH_EDGES = new Set();
 
-function nodeColor(n) {
+// Opaque blend of a colour into the background, so stacked fills don't muddy.
+function mix(hex, into, t) {
+  const p = (h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16));
+  const a = p(hex), b = p(into);
+  return "#" + a.map((v, i) => Math.round(b[i] + (v - b[i]) * t).toString(16).padStart(2, "0")).join("");
+}
+const isDark = () => document.documentElement.dataset.theme !== "light";
+
+function accentFor(n) {
   if (S.colorMode === "risk") {
     if (n.failed) return C.red;
     if (n.between > 0.35) return C.amber;
-    return C.node;
+    return C["text-3"];
   }
-  return fileColor.get(n.file) || C.node;
+  return fileColor.get(n.file) || C["text-3"];
 }
-const radius = (n) => 3.4 + Math.sqrt(n.rank || 0) * 3.6 + Math.min(n.callers || 0, 6) * 0.35;
-
-function drawLabel(ctx, text, x, y, size, color, weight = 500, mono = true) {
-  ctx.font = `${weight} ${size}px ${mono ? '"JetBrains Mono", monospace' : "Inter, sans-serif"}`;
-  ctx.textAlign = "center"; ctx.textBaseline = "top";
-  ctx.lineWidth = size * 0.45; ctx.strokeStyle = C.bg; ctx.lineJoin = "round";
-  ctx.strokeText(text, x, y);
-  ctx.fillStyle = color; ctx.fillText(text, x, y);
+function fontFor(n, weight = 500) {
+  const size = FS * (1 + Math.min(n.rank || 0, 1) * 0.28);
+  return [size, `${weight} ${size}px "JetBrains Mono", ui-monospace, monospace`];
 }
-
-function drawNode(n, ctx, k) {
-  const lit = !LIT || LIT.has(n.id);
-  ctx.globalAlpha = lit ? 1 : 0.13;
-  const fs = 11 / k;
-  if (n.kind === "function") {
-    const devs = claimedBy.get(n.id) || [];
-    const r = radius(n);
-    const sel = n.id === S.selected;
-    const onPath = S.path && S.path.path.includes(n.id);
-    const blast = BLAST.get(n.id);
-    if (sel || onPath) {
-      ctx.beginPath(); ctx.arc(n.x, n.y, r + 7, 0, 2 * Math.PI);
-      ctx.fillStyle = onPath ? C.path + "40" : C.text + "22"; ctx.fill();
-    } else if (blast !== undefined) {
-      ctx.beginPath(); ctx.arc(n.x, n.y, r + 5, 0, 2 * Math.PI);
-      ctx.fillStyle = C.amber + (blast === 1 ? "44" : "26"); ctx.fill();
-    }
-    ctx.beginPath(); ctx.arc(n.x, n.y, r, 0, 2 * Math.PI);
-    ctx.fillStyle = conflictNodes.has(n.id) && !devs.length ? C.red : nodeColor(n);
-    ctx.fill();
-    if (sel) { ctx.lineWidth = 2 / k; ctx.strokeStyle = C.text; ctx.stroke(); }
-    devs.forEach((d, i) => {
-      ctx.beginPath(); ctx.arc(n.x, n.y, r + 2.6 + i * 2.6, 0, 2 * Math.PI);
-      ctx.strokeStyle = devColor(d); ctx.lineWidth = 2; ctx.stroke();
-    });
-    const important = devs.length || conflictNodes.has(n.id) || sel || onPath || blast !== undefined || (n.rank || 0) > 0.45;
-    const hovered = S.hover && S.hover.id === n.id;
-    if (lit && (important || hovered || k > 1.7 || (LIT && LIT.has(n.id)))) {
-      const strong = devs.length || sel || onPath || hovered;
-      drawLabel(ctx, n.name, n.x, n.y + r + 3 + devs.length * 2.6, fs,
-        conflictNodes.has(n.id) && !devs.length ? C.red : strong ? C.text : C["text-2"], strong ? 600 : 500);
-    }
-  } else if (n.kind === "intent") {
-    const t = n.name.length > 34 ? n.name.slice(0, 33) + "…" : n.name;
-    ctx.font = `600 ${fs}px Inter, sans-serif`;
-    const label = `${n.dev} · ${t}`;
-    const w = ctx.measureText(label).width + 14 / k, h = fs + 9 / k, x = n.x - w / 2, y = n.y - h / 2;
-    const c = devColor(n.dev);
-    roundRect(ctx, x, y, w, h, h / 2);
-    if (n.status === "handed_off") {
-      ctx.fillStyle = C.panel; ctx.fill(); ctx.setLineDash([3 / k, 2 / k]); ctx.strokeStyle = c; ctx.lineWidth = 1.2 / k; ctx.stroke(); ctx.setLineDash([]);
-      ctx.fillStyle = c;
-    } else {
-      ctx.fillStyle = c; ctx.fill(); ctx.fillStyle = "#0b0b0e";
-    }
-    ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.fillText(label, n.x, n.y + 0.5 / k);
-  } else if (n.kind === "attempt") {
-    const s = 5.5;
-    ctx.fillStyle = n.outcome === "failed" ? C.red : n.outcome === "succeeded" ? C.green : C.amber;
-    roundRect(ctx, n.x - s / 2, n.y - s / 2, s, s, 1.2); ctx.fill();
-  } else if (n.kind === "decision") {
-    const s = 4.2;
-    ctx.beginPath(); ctx.moveTo(n.x, n.y - s); ctx.lineTo(n.x + s, n.y); ctx.lineTo(n.x, n.y + s); ctx.lineTo(n.x - s, n.y); ctx.closePath();
-    ctx.fillStyle = C.gold; ctx.fill();
+function pillSize(n, ctx) {
+  if (n.__w === undefined || n.__name !== n.name) {
+    const [size, font] = fontFor(n, 600);
+    const c = ctx || pillSize.ctx || (pillSize.ctx = document.createElement("canvas").getContext("2d"));
+    c.font = font;
+    n.__w = c.measureText(n.name).width + PAD * 2 + 2.2;
+    n.__h = PILL_H * (size / FS);
+    n.__name = n.name;
   }
-  ctx.globalAlpha = 1;
+  return [n.__w, n.__h];
 }
 function roundRect(ctx, x, y, w, h, r) {
   ctx.beginPath(); ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r);
   ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath();
 }
 
+function drawNode(n, ctx, k) {
+  const [w, h] = pillSize(n, ctx);
+  const x = n.x - w / 2, y = n.y - h / 2, r = h / 2;
+  const lit = !LIT || LIT.has(n.id);
+  const devs = S.layers.claims ? claimedBy.get(n.id) || [] : [];
+  const sel = n.id === S.selected;
+  const hov = S.hover && S.hover.id === n.id;
+  const onPath = S.path && S.path.path.includes(n.id);
+  const blast = BLAST.get(n.id);
+  const conflict = conflictNodes.has(n.id);
+  const accent = accentFor(n);
+  ctx.save();
+  ctx.globalAlpha = lit ? 1 : 0.16;
+
+  // glow for the states that matter
+  const glow = onPath ? C.path : sel ? C.text : conflict ? C.red : devs.length ? devColor(devs[0]) : null;
+  if (glow && lit) { ctx.shadowColor = glow + (isDark() ? "88" : "55"); ctx.shadowBlur = (sel || onPath ? 18 : 12); }
+
+  // body
+  roundRect(ctx, x, y, w, h, r);
+  let body = isDark() ? mix(accent, C.panel, 0.12) : mix(accent, "#ffffff", 0.1);
+  if (blast !== undefined) body = mix(C.amber, C.panel, blast === 1 ? 0.28 : 0.16);
+  if (onPath) body = mix(C.path, C.panel, isDark() ? 0.2 : 0.16);
+  ctx.fillStyle = body; ctx.fill();
+  ctx.shadowBlur = 0;
+
+  // border
+  let border = isDark() ? mix(accent, C.panel, 0.45) : mix(accent, "#ffffff", 0.55), bw = 0.7;
+  if (blast !== undefined) { border = C.amber; bw = 0.8; }
+  if (devs.length) { border = devColor(devs[0]); bw = 1.3; }
+  if (conflict) { border = C.red; bw = 1.3; }
+  if (onPath) { border = C.path; bw = 1.4; }
+  if (sel || hov) { border = C.text; bw = 1.4; }
+  roundRect(ctx, x, y, w, h, r);
+  ctx.lineWidth = bw; ctx.strokeStyle = border; ctx.stroke();
+
+  // file colour tick
+  ctx.beginPath(); ctx.arc(x + PAD - 0.2, n.y, 1.1, 0, 2 * Math.PI); ctx.fillStyle = accent; ctx.fill();
+
+  // name
+  if (k * FS > 2.6) {
+    const [, font] = fontFor(n, sel || devs.length || conflict || onPath ? 600 : 500);
+    ctx.font = font; ctx.textAlign = "left"; ctx.textBaseline = "middle";
+    ctx.fillStyle = conflict && !devs.length ? C.red : lit ? C.text : C["text-2"];
+    ctx.fillText(n.name, x + PAD + 1.6, n.y + 0.25);
+  }
+
+  // who is on it: stacked avatars on the left edge
+  devs.forEach((d, i) => {
+    const cx = x - 1.2 + i * 3.4, cy = y - 0.2;
+    ctx.beginPath(); ctx.arc(cx, cy, 2.5, 0, 2 * Math.PI);
+    ctx.fillStyle = devColor(d); ctx.fill();
+    ctx.lineWidth = 0.7; ctx.strokeStyle = C.bg; ctx.stroke();
+    if (k > 1.6) {
+      ctx.font = `700 2.9px Inter, sans-serif`; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+      ctx.fillStyle = "#0b0b0e"; ctx.fillText(initials(d), cx, cy + 0.15);
+    }
+  });
+
+  // memory badges on the right edge
+  const m = S.layers.memory ? memOn.get(n.id) : null;
+  if (m) {
+    let bx = x + w - 1;
+    const by = y - 0.2;
+    const badge = (color, count, shape) => {
+      ctx.fillStyle = color; ctx.strokeStyle = C.bg; ctx.lineWidth = 0.7;
+      if (shape === "diamond") {
+        ctx.beginPath(); ctx.moveTo(bx, by - 2.7); ctx.lineTo(bx + 2.7, by); ctx.lineTo(bx, by + 2.7); ctx.lineTo(bx - 2.7, by); ctx.closePath();
+      } else { ctx.beginPath(); ctx.arc(bx, by, 2.4, 0, 2 * Math.PI); }
+      ctx.fill(); ctx.stroke();
+      if (count > 1 && k > 1.6) {
+        ctx.font = `700 2.6px Inter, sans-serif`; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+        ctx.fillStyle = "#0b0b0e"; ctx.fillText(String(count), bx, by + 0.15);
+      }
+      bx -= 5.6;
+    };
+    if (m.failed) badge(C.red, m.failed);
+    if (m.worked) badge(C.green, m.worked);
+    if (m.decisions) badge(C.gold, m.decisions, "diamond");
+  }
+
+  ctx.restore();
+}
+
+const tagText = (t) => `${t.dev} · ${t.name.length > 30 ? t.name.slice(0, 29) + "…" : t.name}`;
+function tagWidth(t) {
+  const c = pillSize.ctx || (pillSize.ctx = document.createElement("canvas").getContext("2d"));
+  c.font = `600 3.5px Inter, sans-serif`;
+  return c.measureText(tagText(t)).width + 6;
+}
+function drawTaskTag(ctx, n, t, bottom, k) {
+  const text = tagText(t);
+  ctx.font = `600 3.5px Inter, sans-serif`;
+  const tw = ctx.measureText(text).width + 6, th = 6.4, tx = n.x - tw / 2, ty = bottom - th;
+  const c = devColor(t.dev);
+  // stem
+  ctx.beginPath(); ctx.moveTo(n.x, ty + th); ctx.lineTo(n.x, bottom + 2.2); ctx.strokeStyle = c; ctx.lineWidth = 0.6; ctx.stroke();
+  roundRect(ctx, tx, ty, tw, th, th / 2);
+  if (t.status === "handed_off") {
+    ctx.fillStyle = C.panel; ctx.fill(); ctx.setLineDash([1.2, 0.9]); ctx.strokeStyle = c; ctx.lineWidth = 0.6; ctx.stroke(); ctx.setLineDash([]);
+    ctx.fillStyle = c;
+  } else { ctx.fillStyle = c; ctx.fill(); ctx.fillStyle = "#0b0b0e"; }
+  if (k * 3.5 > 2.4) { ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.fillText(text, n.x, ty + th / 2 + 0.2); }
+}
+
 function linkColor(l) {
   const [a, b] = linkKey(l);
   const dim = LIT && !(LIT.has(a) && LIT.has(b));
-  if (l.kind === "calls") {
-    if (PATH_EDGES.size && hasEdge(PATH_EDGES, l)) return C.path;
-    if (hasEdge(conflictEdges, l) && !dim) return C.red;
-    if (BLAST.size && BLAST.has(a) && (BLAST.has(b) || b === S.selected)) return C.amber + "cc";
-    return dim ? C.edge.replace(/[\d.]+\)$/, "0.05)") : C.edge;
+  if (PATH_EDGES.size && hasEdge(PATH_EDGES, l)) return C.path;
+  if (hasEdge(conflictEdges, l) && !dim) return C.red;
+  if (BLAST.size && BLAST.has(a) && (BLAST.has(b) || b === S.selected)) return C.amber;
+  if (dim) return isDark() ? "rgba(255,255,255,0.03)" : "rgba(0,0,0,0.04)";
+  const sa = known.get(a), sb = known.get(b);
+  if (sa && sb && sa.file === sb.file && S.colorMode === "file") return mix(fileColor.get(sa.file) || C.node, C.bg, isDark() ? 0.42 : 0.5);
+  return isDark() ? "rgba(161,161,170,0.28)" : "rgba(60,60,70,0.22)";
+}
+const linkLit = (l) => hasEdge(PATH_EDGES, l) || hasEdge(conflictEdges, l) || (BLAST.size && BLAST.has(linkKey(l)[0]));
+
+// Keep each file's functions together.
+function clusterForce() {
+  let nodes = [];
+  const f = (alpha) => {
+    const c = new Map();
+    for (const n of nodes) {
+      const s = c.get(n.file) || { x: 0, y: 0, n: 0 };
+      s.x += n.x; s.y += n.y; s.n++; c.set(n.file, s);
+    }
+    for (const n of nodes) {
+      const s = c.get(n.file);
+      n.vx += (s.x / s.n - n.x) * alpha * 0.22;
+      n.vy += (s.y / s.n - n.y) * alpha * 0.22;
+    }
+  };
+  f.initialize = (ns) => { nodes = ns; };
+  return f;
+}
+// Space a function needs: its pill, plus room above for any task tags.
+function footprint(n) {
+  const [w, h] = pillSize(n);
+  const tags = S.layers.claims ? tasksOn.get(n.id) || [] : [];
+  if (!tags.length) return [n.x, n.y, w, h];
+  const tw = Math.max(...tags.map(tagWidth));
+  const extra = tags.length * 8.4 + 1;
+  return [n.x, n.y - extra / 2, Math.max(w, tw), h + extra];
+}
+// Pills are wide and short, so resolve overlaps as rectangles.
+function rectCollide(gap = 4) {
+  let nodes = [];
+  const f = () => {
+    const fp = nodes.map(footprint);
+    for (let i = 0; i < nodes.length; i++) {
+      const a = nodes[i], [ax, ay, aw, ah] = fp[i];
+      for (let j = i + 1; j < nodes.length; j++) {
+        const b = nodes[j], [bx, by, bw, bh] = fp[j];
+        const dx = (bx + b.vx) - (ax + a.vx), dy = (by + b.vy) - (ay + a.vy);
+        const ox = (aw + bw) / 2 + gap - Math.abs(dx), oy = (ah + bh) / 2 + gap * 1.6 - Math.abs(dy);
+        if (ox > 0 && oy > 0) {
+          if (ox / (aw + bw) < oy / (ah + bh)) { const s = (dx < 0 ? -1 : 1) * ox * 0.5; a.vx -= s; b.vx += s; }
+          else { const s = (dy < 0 ? -1 : 1) * oy * 0.5; a.vy -= s; b.vy += s; }
+        }
+      }
+    }
+  };
+  f.initialize = (ns) => { nodes = ns; };
+  return f;
+}
+
+function regionBoxes() {
+  const boxes = new Map();
+  for (const n of known.values()) {
+    if (n.x === undefined) continue;
+    const [cx, cy, w, h] = footprint(n);
+    const b = boxes.get(n.file) || { x0: Infinity, y0: Infinity, x1: -Infinity, y1: -Infinity, n: 0, lit: false };
+    b.x0 = Math.min(b.x0, cx - w / 2); b.y0 = Math.min(b.y0, cy - h / 2);
+    b.x1 = Math.max(b.x1, cx + w / 2); b.y1 = Math.max(b.y1, cy + h / 2);
+    b.n++; if (!LIT || LIT.has(n.id)) b.lit = true;
+    boxes.set(n.file, b);
   }
-  if (dim) return "rgba(0,0,0,0)";
-  if (l.kind === "claims") return devColor(l.dev) + "99";
-  if (l.kind === "touched") return C.red + "55";
-  if (l.kind === "governs") return C.gold + "55";
-  return C.edge;
+  return boxes;
 }
-function linkVisible(l) {
-  if (l.kind === "calls") return S.layers.calls || hasEdge(conflictEdges, l) || hasEdge(PATH_EDGES, l);
-  if (l.kind === "claims") return S.layers.claims;
-  return S.layers.memory;
+function drawRegions(ctx, k) {
+  drawGrid(ctx);
+  const pad = 7, head = 8;
+  for (const [file, b] of regionBoxes()) {
+    const col = fileColor.get(file) || C.node;
+    const x = b.x0 - pad, y = b.y0 - pad - head, w = b.x1 - b.x0 + pad * 2, h = b.y1 - b.y0 + pad * 2 + head;
+    ctx.save();
+    ctx.globalAlpha = b.lit ? 1 : 0.35;
+    roundRect(ctx, x, y, w, h, 6);
+    ctx.fillStyle = isDark() ? mix(col, C.bg, 0.075) : mix(col, C.bg, 0.1); ctx.fill();
+    ctx.lineWidth = 0.7; ctx.strokeStyle = isDark() ? mix(col, C.bg, 0.3) : mix(col, C.bg, 0.42); ctx.stroke();
+    if (k * 4 > 2.4) {
+      const parts = file.split("/"), base = parts.pop(), dir = parts.length ? parts.join("/") + "/" : "";
+      ctx.font = `500 3.9px "JetBrains Mono", monospace`; ctx.textAlign = "left"; ctx.textBaseline = "middle";
+      const ty = y + head / 2 + 1.6;
+      ctx.fillStyle = isDark() ? mix(col, C.bg, 0.55) : mix(col, "#000000", 0.6);
+      ctx.fillText(dir, x + 4, ty);
+      const dw = ctx.measureText(dir).width;
+      ctx.font = `600 3.9px "JetBrains Mono", monospace`;
+      ctx.fillStyle = isDark() ? mix(col, "#ffffff", 0.75) : mix(col, "#000000", 0.8);
+      ctx.fillText(base, x + 4 + dw, ty);
+      const bw = ctx.measureText(base).width;
+      ctx.font = `500 3.4px Inter, sans-serif`; ctx.fillStyle = C["text-3"];
+      ctx.fillText(`${b.n} fn`, x + 4 + dw + bw + 2.4, ty + 0.1);
+    }
+    ctx.restore();
+  }
 }
-function nodeVisible(n) {
-  if (n.kind === "intent") return S.layers.claims;
-  if (n.kind === "attempt" || n.kind === "decision") return S.layers.memory;
-  return true;
-}
-
-function initGraph() {
-  Graph = ForceGraph()(el)
-    .backgroundColor(C.bg)
-    .nodeId("id")
-    .nodeLabel(() => "")
-    .nodeVisibility(nodeVisible)
-    .linkVisibility(linkVisible)
-    .nodeCanvasObject(drawNode)
-    .nodePointerAreaPaint((n, color, ctx) => {
-      ctx.fillStyle = color; ctx.beginPath(); ctx.arc(n.x, n.y, n.kind === "function" ? radius(n) + 4 : 7, 0, 2 * Math.PI); ctx.fill();
-    })
-    .linkColor(linkColor)
-    .linkWidth((l) => (hasEdge(PATH_EDGES, l) ? 2.6 : hasEdge(conflictEdges, l) ? 2.2 : l.kind === "claims" ? 1.2 : 0.8))
-    .linkLineDash((l) => (l.kind === "claims" || l.kind === "governs" || l.kind === "touched" ? [2, 2] : null))
-    .linkDirectionalArrowLength((l) => (l.kind === "calls" ? 3 : 0))
-    .linkDirectionalArrowRelPos(0.92)
-    .linkDirectionalParticles((l) => (l.kind === "calls" && (hasEdge(conflictEdges, l) || hasEdge(PATH_EDGES, l)) ? 2 : 0))
-    .linkDirectionalParticleWidth(2.4)
-    .linkDirectionalParticleSpeed(0.006)
-    .linkDirectionalParticleColor((l) => (hasEdge(PATH_EDGES, l) ? C.path : C.red))
-    .onRenderFramePre(drawGrid)
-    .onNodeHover((n) => { S.hover = n || null; el.style.cursor = n ? "pointer" : "grab"; recomputeLit(); })
-    .onNodeClick(onNodeClick)
-    .onBackgroundClick(() => { if (S.pathMode) return; clearSelection(); })
-    .onEngineStop(() => { if (!S.userMoved) Graph.zoomToFit(400, 80); })
-    .cooldownTicks(160)
-    .d3VelocityDecay(0.32);
-  Graph.d3Force("charge").strength(-220).distanceMax(320);
-  Graph.d3Force("link").distance((l) => (l.kind === "calls" ? 52 : 30));
-  new ResizeObserver(() => {
-    Graph.width(el.clientWidth).height(el.clientHeight);
-    if (!S.userMoved) Graph.zoomToFit(0, 80);
-  }).observe(el);
-  ["wheel", "pointerdown"].forEach((t) => el.addEventListener(t, () => { S.userMoved = true; }, { passive: true }));
+// Task tags go on top of everything so pills never hide them.
+function drawOverlays(ctx, k) {
+  if (!S.layers.claims) return;
+  for (const [fn, tasks] of tasksOn) {
+    const n = known.get(fn);
+    if (!n || n.x === undefined || (LIT && !LIT.has(fn))) continue;
+    const [, h] = pillSize(n);
+    tasks.forEach((t, i) => drawTaskTag(ctx, n, t, n.y - h / 2 - 4.2 - i * 8.4, k));
+  }
 }
 
-function drawGrid(ctx, k) {
+function drawGrid(ctx) {
   // Dot grid in screen space so it stays crisp at every zoom level.
   const t = ctx.getTransform();
   ctx.save();
@@ -331,6 +445,51 @@ function drawGrid(ctx, k) {
   ctx.restore();
 }
 
+function initGraph() {
+  Graph = ForceGraph()(el)
+    .backgroundColor(C.bg)
+    .nodeId("id")
+    .nodeLabel(() => "")
+    .nodeCanvasObject(drawNode)
+    .nodePointerAreaPaint((n, color, ctx) => {
+      const [w, h] = pillSize(n, ctx); ctx.fillStyle = color; roundRect(ctx, n.x - w / 2, n.y - h / 2, w, h, h / 2); ctx.fill();
+    })
+    .linkVisibility((l) => S.layers.calls || linkLit(l))
+    .linkColor(linkColor)
+    .linkWidth((l) => (hasEdge(PATH_EDGES, l) ? 2.4 : hasEdge(conflictEdges, l) ? 2 : linkLit(l) ? 1.4 : 0.9))
+    .linkCurvature(0.18)
+    .linkDirectionalArrowLength((l) => (linkLit(l) ? 4.5 : 3.2))
+    .linkDirectionalArrowRelPos(0.55)
+    .linkDirectionalParticles((l) => (hasEdge(conflictEdges, l) || hasEdge(PATH_EDGES, l) ? 2 : 0))
+    .linkDirectionalParticleWidth(2.6)
+    .linkDirectionalParticleSpeed(0.006)
+    .linkDirectionalParticleColor((l) => (hasEdge(PATH_EDGES, l) ? C.path : C.red))
+    .onRenderFramePre(drawRegions)
+    .onRenderFramePost(drawOverlays)
+    .onNodeHover((n) => { S.hover = n || null; el.style.cursor = n ? "pointer" : "grab"; recomputeLit(); })
+    .onNodeClick(onNodeClick)
+    .onBackgroundClick(() => { if (S.pathMode) return; clearSelection(); })
+    .onEngineStop(() => { if (!S.userMoved) Graph.zoomToFit(400, 70); })
+    .cooldownTicks(220)
+    .d3AlphaDecay(0.03)
+    .d3VelocityDecay(0.35);
+  Graph.d3Force("charge").strength(-170).distanceMax(260);
+  Graph.d3Force("link").distance((l) => {
+    const a = known.get(linkKey(l)[0]), b = known.get(linkKey(l)[1]);
+    return a && b && a.file === b.file ? 26 : 70;
+  }).strength((l) => {
+    const a = known.get(linkKey(l)[0]), b = known.get(linkKey(l)[1]);
+    return a && b && a.file === b.file ? 0.5 : 0.12;
+  });
+  Graph.d3Force("cluster", clusterForce());
+  Graph.d3Force("collide", rectCollide());
+  new ResizeObserver(() => {
+    Graph.width(el.clientWidth).height(el.clientHeight);
+    if (!S.userMoved) Graph.zoomToFit(0, 70);
+  }).observe(el);
+  ["wheel", "pointerdown"].forEach((t) => el.addEventListener(t, () => { S.userMoved = true; }, { passive: true }));
+}
+
 function recomputeLit() {
   LIT = litSet();
   BLAST = new Map();
@@ -340,39 +499,58 @@ function recomputeLit() {
 }
 
 function updateGraph(d) {
+  const byId = new Map(d.nodes.map((n) => [n.id, n]));
   claimedBy = new Map();
-  for (const l of d.links) if (l.kind === "claims") claimedBy.set(l.target, [...(claimedBy.get(l.target) || []), l.dev]);
+  tasksOn = new Map();
+  const anchored = new Set();
+  for (const l of d.links) if (l.kind === "claims") {
+    claimedBy.set(l.target, [...(claimedBy.get(l.target) || []), l.dev]);
+    if (!anchored.has(l.source)) {  // one tag per task, on its first claimed function
+      anchored.add(l.source);
+      const t = byId.get(l.source);
+      if (t) tasksOn.set(l.target, [...(tasksOn.get(l.target) || []), t]);
+    }
+  }
+  memOn = new Map();
+  const mem = (fn) => memOn.get(fn) || memOn.set(fn, { failed: 0, worked: 0, decisions: 0 }).get(fn);
+  for (const l of d.links) {
+    if (l.kind === "touched") { const a = byId.get(l.source); if (a?.outcome === "failed") mem(l.target).failed++; else if (a?.outcome === "succeeded") mem(l.target).worked++; }
+    if (l.kind === "governs") mem(l.target).decisions++;
+  }
   conflictEdges = new Set();
   conflictNodes = new Set();
   for (const c of d.conflicts) {
     c.path.forEach((p) => conflictNodes.add(p));
     for (let i = 0; i + 1 < c.path.length; i++) conflictEdges.add(c.path[i] + "|" + c.path[i + 1]);
   }
+  const fns = d.nodes.filter((n) => n.kind === "function");
+  const calls = d.links.filter((l) => l.kind === "calls");
   neighbors = new Map();
-  for (const l of d.links) if (l.kind === "calls") {
-    if (!neighbors.has(l.source)) neighbors.set(l.source, new Set());
-    if (!neighbors.has(l.target)) neighbors.set(l.target, new Set());
-    neighbors.get(l.source).add(l.target); neighbors.get(l.target).add(l.source);
+  for (const l of calls) {
+    (neighbors.get(l.source) || neighbors.set(l.source, new Set()).get(l.source)).add(l.target);
+    (neighbors.get(l.target) || neighbors.set(l.target, new Set()).get(l.target)).add(l.source);
   }
-  attached = new Map();
-  for (const l of d.links) if (l.kind !== "calls") {
-    if (!attached.has(l.target)) attached.set(l.target, new Set());
-    attached.get(l.target).add(l.source);
-  }
-  const files = [...new Set(d.nodes.filter((n) => n.kind === "function").map((n) => n.file))].sort();
-  fileColor = new Map(files.map((f, i) => [f, FILE_COLORS[i % FILE_COLORS.length]]));
+  fileOrder = [...new Set(fns.map((n) => n.file))].sort();
+  fileColor = new Map(fileOrder.map((f, i) => [f, FILE_COLORS[i % FILE_COLORS.length]]));
 
-  const next = JSON.stringify([d.nodes.map((n) => n.id + (n.status || "")), d.links.map((l) => l.source + l.target + l.kind)]);
+  const next = JSON.stringify([fns.map((n) => n.id), calls.map((l) => l.source + ">" + l.target), [...tasksOn.keys()].sort()]);
   if (next !== sig) {
     sig = next;
-    const nodes = d.nodes.map((n) => Object.assign(known.get(n.id) || {}, n));
+    // Seed new functions near their file's slot on a ring, so files start apart.
+    const nodes = fns.map((n) => {
+      const prev = known.get(n.id);
+      if (prev) return Object.assign(prev, n);
+      const i = fileOrder.indexOf(n.file), a = (2 * Math.PI * i) / Math.max(1, fileOrder.length);
+      const R = 40 + fileOrder.length * 14;
+      return { ...n, x: Math.cos(a) * R + (Math.random() - 0.5) * 20, y: Math.sin(a) * R + (Math.random() - 0.5) * 20 };
+    });
     known.clear(); nodes.forEach((n) => known.set(n.id, n));
-    Graph.graphData({ nodes, links: d.links.map((l) => ({ ...l })) });
+    Graph.graphData({ nodes, links: calls.map((l) => ({ ...l })) });
   } else {
-    d.nodes.forEach((n) => { const k = known.get(n.id); if (k) Object.assign(k, n); });
+    fns.forEach((n) => { const k = known.get(n.id); if (k) Object.assign(k, n); });
   }
   recomputeLit();
-  renderLegend(files);
+  renderLegend(fileOrder);
 }
 
 function focusNode(id, zoom = false) {
@@ -380,13 +558,11 @@ function focusNode(id, zoom = false) {
   if (!n || n.x === undefined) return;
   S.userMoved = true;
   Graph.centerAt(n.x, n.y, 500);
-  if (zoom) Graph.zoom(Math.max(Graph.zoom(), 2.2), 500);
+  if (zoom) Graph.zoom(Math.max(Graph.zoom(), 2.6), 500);
 }
 
 // ---------------------------------------------------------------- interactions
 async function onNodeClick(n) {
-  if (n.kind === "intent") { setFocusDev(n.dev === S.focusDev ? null : n.dev); return; }
-  if (n.kind === "attempt" || n.kind === "decision") { openTab("memory"); return; }
   if (S.pathMode) {
     if (!S.pathFrom) { S.pathFrom = n.id; renderBanner(); return; }
     if (n.id === S.pathFrom) return;
@@ -442,15 +618,14 @@ function renderTop(d) {
   $("#teamName").textContent = S.team;
 }
 function renderLegend(files) {
+  const pill = (c) => `<svg viewBox="0 0 22 12" style="width:20px"><rect x="1" y="2" width="20" height="8" rx="4" fill="${isDark() ? mix(c, C.panel, 0.12) : mix(c, "#ffffff", 0.1)}" stroke="${isDark() ? mix(c, C.panel, 0.5) : mix(c, "#ffffff", 0.55)}"/><circle cx="5" cy="6" r="1.4" fill="${c}"/></svg>`;
   const dot = (c) => `<svg viewBox="0 0 12 12"><circle cx="6" cy="6" r="4" fill="${c}"/></svg>`;
-  const ring = `<svg viewBox="0 0 12 12"><circle cx="6" cy="6" r="2.5" fill="${C.node}"/><circle cx="6" cy="6" r="4.6" fill="none" stroke="${C.blue}" stroke-width="1.6"/></svg>`;
-  const sq = (c) => `<svg viewBox="0 0 12 12"><rect x="3" y="3" width="6" height="6" rx="1.3" fill="${c}"/></svg>`;
   const dia = `<svg viewBox="0 0 12 12"><path d="M6 1.8 10.2 6 6 10.2 1.8 6z" fill="${C.gold}"/></svg>`;
   const line = (c) => `<svg viewBox="0 0 12 12"><path d="M1 6h10" stroke="${c}" stroke-width="2"/></svg>`;
   const parts = S.colorMode === "risk"
-    ? [`${dot(C.red)}has failed attempts`, `${dot(C.amber)}chokepoint`, `${dot(C.node)}function`]
-    : files.slice(0, 5).map((f) => `${dot(fileColor.get(f))}<span class="mono">${esc(f.split("/").pop())}</span>`).concat(files.length > 5 ? [`+${files.length - 5} files`] : []);
-  parts.push(`${ring}claimed`, `${sq(C.red)}failed`, `${sq(C.green)}worked`, `${dia}decision`, `${line(C.red)}conflict`);
+    ? [`${pill(C.red)}has failed attempts`, `${pill(C.amber)}chokepoint`, `${pill(C["text-3"])}function`]
+    : files.slice(0, 4).map((f) => `${pill(fileColor.get(f))}<span class="mono">${esc(f.split("/").pop())}</span>`).concat(files.length > 4 ? [`+${files.length - 4} files`] : []);
+  parts.push(`${dot(C.blue)}someone's on it`, `${dot(C.red)}failed`, `${dot(C.green)}worked`, `${dia}decision`, `${line(C.red)}conflict`);
   $("#legend").innerHTML = parts.map((p) => `<span>${p}</span>`).join("");
 }
 function renderBanner() {
@@ -722,7 +897,7 @@ function renderPalette() {
     { t: "Find path between two functions", ic: "route", hint: "P", run: () => startPath(S.selected) },
     { t: "Record a decision", ic: "diamond", hint: "D", run: () => openForm("decision") },
     { t: "Add a convention", ic: "rule", run: () => openForm("convention") },
-    { t: "Fit graph to screen", ic: "fit", hint: "F", run: () => Graph.zoomToFit(400, 80) },
+    { t: "Fit graph to screen", ic: "fit", hint: "F", run: () => Graph.zoomToFit(400, 70) },
     { t: `Switch to ${document.documentElement.dataset.theme === "dark" ? "light" : "dark"} theme`, ic: "sun", run: () => setTheme(document.documentElement.dataset.theme === "dark" ? "light" : "dark") },
     { t: "Show memory", ic: "layers", run: () => openTab("memory") },
     { t: "Show activity", ic: "bolt", run: () => openTab("activity") },
@@ -866,11 +1041,11 @@ $("#themeBtn").addEventListener("click", () => setTheme(document.documentElement
 $("#pathBtn").addEventListener("click", () => (S.pathMode || S.path ? (S.pathMode = false, S.path = null, S.pathFrom = null, recomputeLit(), renderBanner()) : startPath(S.selected)));
 $("#zoomIn").addEventListener("click", () => { S.userMoved = true; Graph.zoom(Graph.zoom() * 1.4, 250); });
 $("#zoomOut").addEventListener("click", () => { S.userMoved = true; Graph.zoom(Graph.zoom() / 1.4, 250); });
-$("#zoomFit").addEventListener("click", () => Graph.zoomToFit(400, 80));
+$("#zoomFit").addEventListener("click", () => Graph.zoomToFit(400, 70));
 $("#layers").addEventListener("click", (e) => {
   const b = e.target.closest("button"); if (!b) return;
   S.layers[b.dataset.layer] = !S.layers[b.dataset.layer]; b.classList.toggle("on", S.layers[b.dataset.layer]);
-  store.set("layers", S.layers); Graph.nodeVisibility(nodeVisible).linkVisibility(linkVisible);
+  store.set("layers", S.layers); Graph.linkVisibility(Graph.linkVisibility());
 });
 $("#colorMode").addEventListener("click", (e) => {
   const b = e.target.closest("button"); if (!b) return;
@@ -912,7 +1087,7 @@ document.addEventListener("keydown", (e) => {
   if (typing) return;
   if (e.key === "Escape") { if (S.focusDev) setFocusDev(null); clearSelection(); }
   else if (e.key === "/") { e.preventDefault(); openPalette(); }
-  else if (e.key === "f") Graph.zoomToFit(400, 80);
+  else if (e.key === "f") Graph.zoomToFit(400, 70);
   else if (e.key === "p") startPath(S.selected);
   else if (e.key === "d") openForm("decision", { targets: S.detail?.name || "" });
 });

@@ -170,3 +170,17 @@ def test_explaining_a_fix_updates_the_resolved_failure(repo):
     bob.record_attempt(["validate_token"], "Accept both token formats", "succeeded", "old sessions survive")
     [f] = [a for a in Brain(g, "x").context(["validate_token"])["attempts"] if a["outcome"] == "failed"]
     assert f["fix"] == "Accept both token formats"
+
+
+def test_timestamps_come_from_the_database_clock(repo, monkeypatch):
+    import time as _time
+
+    g, _ = repo
+    real = _time.time
+    monkeypatch.setattr("hivemind.brain.time.time", lambda: real() + 5.5 * 3600)  # a laptop 5.5h fast
+    b = Brain(g, "alice")
+    b.attach_session("s-clock")
+    b.note_prompt("anything")
+    ts = b.q("MATCH (e:Event) RETURN max(e.ts) AS ts")[0]["ts"]
+    server = g.query("RETURN timestamp()").result_set[0][0] / 1000
+    assert abs(ts - server) < 5

@@ -55,3 +55,36 @@ def test_join_hands_over_the_connection_only_with_the_code(team):
 def test_join_is_off_for_local_dashboards(team):
     c = TestClient(create_app(Settings(team=team)))
     assert c.get("/api/join").status_code == 404
+
+
+def test_public_simulation_dashboard(team, monkeypatch):
+    from pathlib import Path
+
+    from hivemind.ui import app_from_env
+
+    monkeypatch.setenv("HIVEMIND_PUBLIC", "1")
+    monkeypatch.setenv("HIVEMIND_TEAMS", team)
+    monkeypatch.setenv("HIVEMIND_SIM_TEAM", team)
+    monkeypatch.setenv("HIVEMIND_SIM_PROJECT", str(Path(__file__).resolve().parents[1] / "examples" / "shopapp"))
+    monkeypatch.delenv("HIVEMIND_DASHBOARD_KEY", raising=False)
+    c = TestClient(app_from_env())
+    sim = c.get("/api/sim").json()  # no access code needed
+    assert sim["enabled"] and sim["step"] == 0 and sim["total"] == 12
+    for i in range(12):
+        sim = c.post(f"/api/sim/step?expect={i}").json()
+    assert sim["step"] == 12
+    assert c.post("/api/sim/step?expect=3").json()["step"] == 12  # stale clicks are ignored
+    state = c.get(f"/api/state?team={team}").json()
+    assert {d["name"] for d in state["devs"]} == {"Priya", "Marco", "Aisha", "Ken", "Lena"}
+    assert c.get("/api/state?team=someone_else").status_code == 403
+    assert c.get("/api/join").status_code == 404  # never hands out the database
+    assert c.post("/api/sim/reset").json()["step"] == 0
+
+
+def test_public_dashboard_requires_a_team_list(monkeypatch):
+    from hivemind.ui import app_from_env
+
+    monkeypatch.setenv("HIVEMIND_PUBLIC", "1")
+    monkeypatch.delenv("HIVEMIND_TEAMS", raising=False)
+    with pytest.raises(RuntimeError):
+        app_from_env()

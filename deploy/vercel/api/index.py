@@ -12,6 +12,9 @@ from urllib.parse import parse_qsl, urlencode
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 
+# The simulation replays a story on the bundled example project.
+os.environ.setdefault("HIVEMIND_SIM_PROJECT", os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "shopapp"))
+
 from hivemind.ui import app_from_env  # noqa: E402
 
 

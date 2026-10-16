@@ -42,9 +42,10 @@ const isTest = (q) => {
   const path = fileOf(q), name = short(q).split(".").pop(), base = path.split("/").pop();
   return /(^|\/)tests?\//.test(path) || base.startsWith("test_") || base.endsWith("_test.py") || name.startsWith("test");
 };
+let clockSkew = 0;  // server time minus this browser's time: viewers' clocks can be off
 const ago = (ts) => {
   if (!ts) return "never";
-  const s = Math.max(0, Date.now() / 1000 - ts);
+  const s = Math.max(0, Date.now() / 1000 + clockSkew - ts);
   if (s < 45) return "just now";
   if (s < 3600) return `${Math.round(s / 60)}m ago`;
   if (s < 86400) return `${Math.round(s / 3600)}h ago`;
@@ -752,7 +753,8 @@ function renderInspector() {
   const d = S.detail;
   if (!S.selected || !d || d.error) { box.innerHTML = introHtml(); paintIcons(box); return; }
   const blastByD = {};
-  d.blast_radius.forEach((b) => (blastByD[b.distance] ||= []).push(b.caller));
+  const blast = d.blast_radius.filter((b) => S.layers.tests || !isTest(b.caller));
+  blast.forEach((b) => (blastByD[b.distance] ||= []).push(b.caller));
   const conflictHere = (S.data?.conflicts || []).filter((c) => c.path.includes(d.id));
   const failed = d.attempts.filter((a) => a.outcome === "failed" && !a.resolved).length;
   box.innerHTML = `
@@ -764,7 +766,7 @@ function renderInspector() {
     <div class="badges">
       <span class="badge" title="PageRank across the call graph">Core <b>${Math.round(d.rank * 100)}</b></span>
       <span class="badge ${d.between > 0.35 ? "amber" : ""}" title="Share of call paths that run through it">Chokepoint <b>${Math.round(d.between * 100)}</b></span>
-      <span class="badge">Used by <b>${d.blast_radius.length}</b></span>
+      <span class="badge">Used by <b>${blast.length}</b></span>
       ${failed ? `<span class="badge red">${failed} failed attempt${failed > 1 ? "s" : ""}</span>` : ""}
       ${conflictHere.length ? `<span class="badge red">On a conflict path</span>` : ""}
     </div>
@@ -796,8 +798,8 @@ function renderInspector() {
     ${(d.changes || []).length ? `<div class="section"><h4>Edits <span class="count">${d.changes.length}</span></h4>
       <div class="edits">${d.changes.map((c) => `<div class="edit-row">${avatar(c.dev, "sm")}<span><b>${esc(c.dev)}</b> ${c.kind === "added" ? "added it" : "changed it"}</span>${agentTag(c.agent)}<time>${ago(c.ts)}</time></div>`).join("")}</div></div>` : ""}
 
-    <div class="section"><h4>Impact if changed <span class="count">${d.blast_radius.length}</span></h4>
-      ${d.blast_radius.length ? Object.entries(blastByD).map(([k, fns]) => `
+    <div class="section"><h4>Impact if changed <span class="count">${blast.length}</span></h4>
+      ${blast.length ? Object.entries(blastByD).map(([k, fns]) => `
         <div class="impact-row"><div class="d">${k} hop${k > 1 ? "s" : ""}</div><div class="fns">${fns.map(fnChip).join("")}</div></div>`).join("")
         : `<div class="empty">Nothing calls this function.</div>`}
     </div>
@@ -895,7 +897,7 @@ const EVENT_STYLE = {
   start: ["play", "var(--blue)"], claim: ["task", "var(--text-3)"], release: ["check", "var(--green)"],
   attempt: ["bolt", "var(--amber)"], decision: ["diamond", "var(--gold)"], convention: ["rule", "var(--text-2)"],
   handoff: ["handoff", "var(--amber)"], resume: ["swap", "var(--blue)"],
-  edit: ["fn", "var(--text-2)"], test: ["check", "var(--text-2)"],
+  edit: ["fn", "var(--text-2)"], test: ["check", "var(--text-2)"], blocked: ["alert", "var(--red)"],
 };
 function renderFeed() {
   const d = S.data; if (!d) return;
@@ -916,7 +918,7 @@ function renderFeed() {
     } else text = esc(text);
     const targets = (e.targets || []).slice(0, 3).map(fnChip).join(" ");
     return `<div class="ev ${fresh ? "new" : ""}"><span class="k" style="color:${col}"><i data-icon="${ic}"></i></span>
-      <div class="txt"><b>${esc(e.dev)}</b> ${esc({ claim: "claimed code", edit: "edited code", test: "ran tests" }[e.kind] || e.kind)}<span class="t">${text}</span>${targets ? `<div class="task-foot" style="margin-top:5px">${targets}</div>` : ""}</div>
+      <div class="txt"><b>${esc(e.dev)}</b> ${esc({ claim: "claimed code", edit: "edited code", test: "ran tests", blocked: "was warned" }[e.kind] || e.kind)}<span class="t">${text}</span>${targets ? `<div class="task-foot" style="margin-top:5px">${targets}</div>` : ""}</div>
       <time>${ago(e.ts)}</time></div>`;
   }).join("") || `<div class="empty center">Nothing has happened yet.</div>`;
   paintIcons($("#feed"));
@@ -1041,9 +1043,82 @@ async function loadTeams() {
   $("#teamName").textContent = S.team;
 }
 function switchTeam(t) {
+  stopSim();
+  setTimeout(renderSim, 0);
   S.team = t; S.selected = null; S.detail = null; S.path = null; S.focusDev = null; S.feedDev = null; S.memory = null;
   S.seenEvents = new Set(); S.userMoved = false; sig = ""; known.clear();
   syncUrl(); loadTeams(); refresh(); renderInspector(); renderBanner();
+}
+
+// ---------------------------------------------------------------- simulation
+// A hosted demo can replay a scripted team story; each step is one server call.
+const SIM = { data: null, playing: false, timer: null, busy: false };
+const SIM_DELAY = 7000;
+async function loadSim() {
+  try { SIM.data = await api("sim", {}, false); } catch { SIM.data = null; }
+  renderSim();
+}
+function renderSim() {
+  let box = $("#sim");
+  const d = SIM.data;
+  const on = !!(d && d.enabled && d.team === S.team);
+  document.body.classList.toggle("sim-on", on);
+  if (!on) { if (box) box.remove(); return; }
+  if (!box) {
+    box = document.createElement("div");
+    box.id = "sim"; box.className = "sim";
+    $(".stage").appendChild(box);
+    box.addEventListener("click", (e) => {
+      const b = e.target.closest("button[data-sim]"); if (!b) return;
+      ({ play: simToggle, next: () => simStep(true), restart: simRestart })[b.dataset.sim]();
+    });
+  }
+  const done = d.step >= d.total;
+  const dots = Array.from({ length: d.total }, (_, i) => `<i class="${i < d.step ? "on" : ""} ${i === d.step - 1 ? "cur" : ""}" title="${esc(d.steps[i])}"></i>`).join("");
+  box.innerHTML = `
+    <div class="sim-top">
+      <span class="sim-label">Simulation</span>
+      <span class="sim-count">${d.step > 0 ? `Step ${d.step} of ${d.total}` : `${d.total} steps`}</span>
+      <div class="sim-dots">${dots}</div>
+    </div>
+    <div class="sim-title">${esc(d.title)}</div>
+    <div class="sim-text">${esc(d.narration)}</div>
+    <div class="sim-controls">
+      <button class="btn primary sm" data-sim="play">${SIM.playing ? "Pause" : done ? "Play again" : d.step > 0 ? "Resume" : "Play"}</button>
+      <button class="btn sm" data-sim="next" ${done || SIM.busy ? "disabled" : ""}>Next step</button>
+      <button class="btn sm" data-sim="restart">Restart</button>
+      ${SIM.playing ? `<span class="sim-progress"><span style="animation-duration:${SIM_DELAY}ms"></span></span>` : ""}
+    </div>`;
+}
+async function simStep(manual = false) {
+  if (SIM.busy || !SIM.data) return;
+  if (SIM.data.step >= SIM.data.total) { stopSim(); return; }
+  SIM.busy = true; renderSim();
+  try {
+    SIM.data = await api(`sim/step?expect=${SIM.data.step}`, { method: "POST" }, false);
+  } catch (e) { toast("Simulation step failed: " + e.message, "alert"); stopSim(); }
+  SIM.busy = false;
+  await refresh();
+  if (SIM.data.focus) { await select(SIM.data.focus, { center: false }); } else { clearSelection(); }
+  if (S.tab === "memory") loadMemory();
+  if (SIM.data.step >= SIM.data.total) stopSim();
+  renderSim();
+  if (SIM.playing && !manual) schedule();
+}
+function schedule() { clearTimeout(SIM.timer); SIM.timer = setTimeout(() => simStep(), SIM_DELAY); }
+function stopSim() { SIM.playing = false; clearTimeout(SIM.timer); renderSim(); }
+async function simToggle() {
+  if (SIM.playing) return stopSim();
+  if (SIM.data.step >= SIM.data.total) await simRestart();
+  SIM.playing = true; renderSim();
+  await simStep();
+}
+async function simRestart() {
+  stopSim();
+  SIM.busy = true; renderSim();
+  try { SIM.data = await api("sim/reset", { method: "POST" }, false); } catch (e) { toast(e.message, "alert"); }
+  SIM.busy = false; S.userMoved = false; sig = ""; known.clear(); clearSelection();
+  await refresh(); renderSim();
 }
 
 // ---------------------------------------------------------------- polling
@@ -1051,6 +1126,7 @@ let failures = 0;
 async function refresh() {
   try {
     const d = await api("state");
+    if (d.now) clockSkew = d.now - Date.now() / 1000;
     S.data = d; failures = 0; $("#live").classList.remove("stale");
     updateGraph(d); renderTop(d); renderConflicts(d); renderDevs(); renderTasks(d); renderHotspots(d); renderFeed();
     if (!S.detail && S.tab === "inspect") renderInspector();
@@ -1164,6 +1240,7 @@ document.addEventListener("keydown", (e) => {
   await loadTeams();
   syncUrl();
   await refresh();
+  await loadSim();
   const fn = params.get("fn");
   if (fn) select(fn);
   else renderInspector();

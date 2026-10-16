@@ -78,8 +78,21 @@ class Brain:
         # Optional source of an external session id (e.g. Claude Code's),
         # consulted when the first write needs a session.
         self.session_hint: Callable[[], str | None] | None = None
+        self._clock_offset: float | None = None
 
     # ------------------------------------------------------------------ helpers
+
+    def now(self) -> float:
+        """Seconds since the epoch by the database server's clock. Teammates'
+        laptops disagree about the time (one here was 5.5 hours off), so every
+        timestamp in the shared graph comes from one clock."""
+        if self._clock_offset is None:
+            try:
+                server = self.g.query("RETURN timestamp()").result_set[0][0] / 1000
+                self._clock_offset = server - time.time()
+            except Exception:
+                self._clock_offset = 0.0
+        return round(time.time() + self._clock_offset, 3)
 
     def q(self, query: str, **params: Any) -> list[dict]:
         return rows(self.g, query, params)
@@ -100,7 +113,7 @@ class Brain:
                 dev=self.dev,
                 sid=self.session_id,
                 agent=self.agent,
-                ts=_now(),
+                ts=self.now(),
             )
         return self.session_id
 
@@ -116,7 +129,7 @@ class Brain:
             dev=self.dev,
             sid=session_id,
             agent=self.agent,
-            ts=_now(),
+            ts=self.now(),
         )
         self.session_id = session_id
         return session_id
@@ -164,7 +177,7 @@ class Brain:
             sid=sid,
             iid=iid,
             desc=description,
-            ts=_now(),
+            ts=self.now(),
         )
         self._event("start", description)
         return iid
@@ -197,7 +210,7 @@ class Brain:
         if not message:
             return
         sid = self._session()
-        self.q("MATCH (s:Session {id: $sid}) SET s.progress = $m, s.progress_ts = $ts", sid=sid, m=message[:2000], ts=_now())
+        self.q("MATCH (s:Session {id: $sid}) SET s.progress = $m, s.progress_ts = $ts", sid=sid, m=message[:2000], ts=self.now())
         # The latest task of this session, even if the agent already closed it.
         self.q(
             """
@@ -207,7 +220,7 @@ class Brain:
             """,
             sid=sid,
             m=message[:2000],
-            ts=_now(),
+            ts=self.now(),
         )
 
     def functions_in_lines(self, path: str, start: int, end: int) -> list[str]:
@@ -232,7 +245,7 @@ class Brain:
             CREATE (s)-[:LOGGED]->(:Event {ts: $ts, dev: $dev, kind: $kind, text: $text, targets: $targets})
             """,
             sid=self._session(),
-            ts=_now(),
+            ts=self.now(),
             dev=self.dev,
             kind=kind,
             text=text,
@@ -320,7 +333,7 @@ class Brain:
             sid=sid,
             iid=iid,
             desc=intent,
-            ts=_now(),
+            ts=self.now(),
         )
         self._event("start", intent)
         result: dict[str, Any] = {"intent_id": iid, "session_id": sid}
@@ -342,7 +355,7 @@ class Brain:
             """,
             iid=intent_id,
             q=qnames,
-            ts=_now(),
+            ts=self.now(),
         )
         if not quiet:
             self._event("claim", f"claimed {len(qnames)} function(s)", qnames)
@@ -400,7 +413,7 @@ class Brain:
             iid=intent_id,
             status=outcome,
             summary=summary,
-            ts=_now(),
+            ts=self.now(),
         )
         self._event("release", f"{outcome}: {summary}" if summary else outcome)
         return {"intent_id": intent_id, "status": outcome}
@@ -417,7 +430,7 @@ class Brain:
             note=note,
             to=to_dev or "",
             dev=self.dev,
-            ts=_now(),
+            ts=self.now(),
         )
         self._event("handoff", note)
         return {"intent_id": intent_id, "status": "handed_off", "to": to_dev or "anyone"}
@@ -515,7 +528,7 @@ class Brain:
             dev=self.dev,
             agent=self.agent,
             tool=tool,
-            ts=_now(),
+            ts=self.now(),
             added=diff.get("added", []),
             changed=diff.get("changed", []),
             removed=diff.get("removed", []),
@@ -584,7 +597,7 @@ class Brain:
                 sid=sid,
                 outcome=outcome,
                 q=qnames,
-                since=_now() - 1800,
+                since=self.now() - 1800,
             )
             if captured:
                 c = captured[0]
@@ -618,7 +631,7 @@ class Brain:
                 aid=dup["id"],
                 sid=sid,
                 dev=self.dev,
-                ts=_now(),
+                ts=self.now(),
                 q=qnames,
             )
             self._event("attempt", f"[{outcome}] {summary} (seen {dup['count'] + 1}×)", qnames)
@@ -642,7 +655,7 @@ class Brain:
             reason=reason,
             dev=self.dev,
             agent=self.agent,
-            ts=_now(),
+            ts=self.now(),
             auto=auto,
             sig=signature,
             q=qnames,
@@ -728,7 +741,7 @@ class Brain:
             title=title,
             rationale=rationale,
             source=source,
-            ts=_now(),
+            ts=self.now(),
             q=qnames,
             files=files,
         )
@@ -794,7 +807,7 @@ class Brain:
             rule=rule,
             scope="files" if files else "repo",
             files=files or [],
-            ts=_now(),
+            ts=self.now(),
         )
         self._event("convention", rule)
         return {"convention_id": cid}

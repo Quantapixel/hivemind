@@ -483,3 +483,27 @@ kbd {
 .edit-row time { margin-left: auto; color: var(--text-3); font-size: 11.5px; }
 .task-ref { font-size: 11.5px; color: var(--text-3); margin-top: 3px; }
 .tl .meta .agent-tag { margin-left: 0; }
+
+/* ---------- simulation player ---------- */
+.sim {
+  position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%); z-index: 6;
+  width: min(640px, calc(100% - 100px)); display: flex; flex-direction: column; gap: 6px;
+  padding: 14px 16px; border-radius: 12px; background: var(--panel); border: 1px solid var(--line-2); box-shadow: var(--shadow);
+}
+.sim-on .legend { display: none; }
+.sim-top { display: flex; align-items: center; gap: 10px; font-size: 11.5px; color: var(--text-3); }
+.sim-label { text-transform: uppercase; letter-spacing: .08em; font-weight: 600; color: var(--text-2); }
+.sim-count { font-variant-numeric: tabular-nums; }
+.sim-dots { display: flex; gap: 4px; margin-left: auto; }
+.sim-dots i { width: 8px; height: 8px; border-radius: 50%; background: var(--line-2); }
+.sim-dots i.on { background: var(--text-3); }
+.sim-dots i.cur { background: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.sim-title { font-weight: 600; font-size: 15px; letter-spacing: -.01em; }
+.sim-text { color: var(--text-2); font-size: 13px; line-height: 1.5; }
+.sim-controls { display: flex; gap: 6px; align-items: center; margin-top: 4px; flex-wrap: wrap; }
+.sim-controls .btn[disabled] { opacity: .45; cursor: default; }
+.sim-progress { flex: 1; min-width: 60px; height: 3px; border-radius: 3px; background: var(--raised); overflow: hidden; margin-left: 6px; }
+.sim-progress span { display: block; height: 100%; width: 0; background: var(--accent); animation: simbar linear forwards; }
+@keyframes simbar { to { width: 100%; } }
+@media (prefers-reduced-motion: reduce) { .sim-progress span { animation: none; width: 100%; opacity: .4; } }
+@media (max-width: 1020px) { .sim { width: calc(100% - 28px); left: 14px; transform: none; bottom: 14px; } }

@@ -88,7 +88,7 @@ def join(dashboard: str, code: str | None, path: Path, agents: list[str] | None,
     info = fetch_join(dashboard, code)
     settings = Settings(url=info["url"], team=info["team"])
     try:
-        open_db(settings).select_graph("hivemind_ping").query("RETURN 1")
+        open_db(settings).connection.ping()
     except Exception as exc:
         raise SystemExit(f"Got the team's database from the dashboard but could not reach it: {exc}\n"
                          "If it's a free FalkorDB Cloud instance it may be asleep; ask whoever invited you.") from None

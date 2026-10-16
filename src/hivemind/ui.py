@@ -214,6 +214,7 @@ def state(teams: Teams, team: str) -> dict:
         "devs": devs,
         "events": brain.recent_events(60),
         "stats": stats,
+        "now": brain.now(),
     }
 
 
@@ -341,6 +342,8 @@ def create_app(
     access_key: str | None = None,
     allowed_teams: list[str] | None = None,
     allow_join: bool = False,
+    sim_team: str | None = None,
+    sim_project: Path | None = None,
 ) -> Starlette:
     teams = Teams(settings, allowed_teams)
 
@@ -378,6 +381,39 @@ def create_app(
         )
         names = teams.allowed or [settings.team]
         return JSONResponse({"url": url, "team": names[0], "teams": names})
+
+    def sim_graph():
+        if not (sim_team and sim_project):
+            return None
+        return teams.brain(sim_team).g
+
+    async def api_sim(_: Request) -> JSONResponse:
+        from . import simulation
+
+        g = sim_graph()
+        if g is None:
+            return JSONResponse({"enabled": False})
+        if simulation.state(g) < 0:
+            simulation.reset(g, sim_project)
+        return JSONResponse({"enabled": True, "team": sim_team, **simulation.describe(g)})
+
+    async def api_sim_step(request: Request) -> JSONResponse:
+        from . import simulation
+
+        g = sim_graph()
+        if g is None:
+            return JSONResponse({"error": "no simulation on this dashboard"}, status_code=404)
+        expect = request.query_params.get("expect")
+        return JSONResponse({"enabled": True, "team": sim_team, **simulation.advance(g, int(expect) if expect else None)})
+
+    async def api_sim_reset(_: Request) -> JSONResponse:
+        from . import simulation
+
+        g = sim_graph()
+        if g is None:
+            return JSONResponse({"error": "no simulation on this dashboard"}, status_code=404)
+        teams._metrics.pop(sim_team, None)
+        return JSONResponse({"enabled": True, "team": sim_team, **simulation.reset(g, sim_project)})
 
     async def api_write(request: Request) -> JSONResponse:
         body = await request.json()
@@ -427,6 +463,9 @@ def create_app(
             Route("/api/path", api_path),
             Route("/api/memory", api_memory),
             Route("/api/join", api_join),
+            Route("/api/sim", api_sim),
+            Route("/api/sim/step", api_sim_step, methods=["POST"]),
+            Route("/api/sim/reset", api_sim_reset, methods=["POST"]),
             Route("/api/{kind}", api_write, methods=["POST"]),
             Mount("/static", StaticFiles(directory=STATIC)),
         ]
@@ -437,14 +476,24 @@ def app_from_env() -> Starlette:
     """The hosted dashboard. Configure with FALKORDB_URL, HIVEMIND_DASHBOARD_KEY
     (required) and optionally HIVEMIND_TEAMS (comma-separated)."""
     key = os.environ.get("HIVEMIND_DASHBOARD_KEY", "")
-    if len(key) < 8:
-        raise RuntimeError("Set HIVEMIND_DASHBOARD_KEY (8+ characters) before hosting the dashboard.")
+    public = os.environ.get("HIVEMIND_PUBLIC") == "1"
     allowed = [t.strip() for t in os.environ.get("HIVEMIND_TEAMS", "").split(",") if t.strip()] or None
+    if public:
+        # A public demo: no access code, so it may only show named teams and
+        # must never hand out the database connection.
+        if not allowed:
+            raise RuntimeError("A public dashboard needs HIVEMIND_TEAMS (the teams it may show).")
+        key = ""
+    elif len(key) < 8:
+        raise RuntimeError("Set HIVEMIND_DASHBOARD_KEY (8+ characters) before hosting the dashboard.")
     settings = Settings.from_env()
     if allowed:
         settings.team = allowed[0]
-    allow_join = os.environ.get("HIVEMIND_ALLOW_JOIN", "1") != "0"
-    return create_app(settings, access_key=key, allowed_teams=allowed, allow_join=allow_join)
+    allow_join = not public and os.environ.get("HIVEMIND_ALLOW_JOIN", "1") != "0"
+    sim_team = os.environ.get("HIVEMIND_SIM_TEAM") or None
+    sim_project = Path(os.environ["HIVEMIND_SIM_PROJECT"]) if os.environ.get("HIVEMIND_SIM_PROJECT") else None
+    return create_app(settings, access_key=key or None, allowed_teams=allowed, allow_join=allow_join,
+                      sim_team=sim_team, sim_project=sim_project)
 
 
 def run(settings: Settings, host: str = "127.0.0.1", port: int = 8765, access_key: str | None = None) -> None:

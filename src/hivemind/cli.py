@@ -99,7 +99,7 @@ def cmd_connect(args: argparse.Namespace) -> None:
 
     s = Settings(url=args.url, team=args.team or "demo")
     try:
-        open_db(s).select_graph("hivemind_ping").query("RETURN 1")
+        open_db(s).connection.ping()
     except Exception as exc:
         sys.exit(f"Could not connect to {s.where()}: {exc}")
     path = save_user_config({"url": args.url, "team": s.team})

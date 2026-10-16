@@ -194,7 +194,7 @@ def init_kiro(repo: Path) -> list[str]:
 
 def init(repo: Path, settings: Settings, agents: list[str] | None = None) -> list[str]:
     repo = repo.resolve()
-    done = [f"{write_config(repo, settings).relative_to(repo)}: team '{settings.team}' at {settings.host}:{settings.port}"]
+    done = [f"{write_config(repo, settings).relative_to(repo)}: team '{settings.team}' at {settings.where()}"]
     for agent in agents or ["claude"]:
         if agent not in AGENTS:
             raise ValueError(f"unknown agent {agent!r}; choose from {', '.join(AGENTS)}")

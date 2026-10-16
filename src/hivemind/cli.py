@@ -57,7 +57,7 @@ def cmd_init(args: argparse.Namespace) -> None:
         print(f"  {line}")
     if not args.no_index:
         print(f"  indexed {json.dumps(index_repo(connect(s), Path(args.path)))}")
-    print(f"Ready. Team '{s.team}' at {s.host}:{s.port}. You are '{default_dev(args.path)}' (set HIVEMIND_DEV to change).")
+    print(f"Ready. Team '{s.team}' at {s.where()}. You are '{default_dev(args.path)}' (set HIVEMIND_DEV to change).")
     if "kiro" in agents:
         print("Kiro: start with `kiro-cli chat --agent hivemind`.")
     if "codex" in agents:
@@ -88,6 +88,32 @@ def cmd_watch(args: argparse.Namespace) -> None:
         run(root, s, agent=args.agent, interval=args.interval)
     except KeyboardInterrupt:
         pass
+
+
+def cmd_connect(args: argparse.Namespace) -> None:
+    from .db import Settings, open_db, save_user_config
+
+    s = Settings(url=args.url, team=args.team or "demo")
+    try:
+        open_db(s).select_graph("hivemind_ping").query("RETURN 1")
+    except Exception as exc:
+        sys.exit(f"Could not connect to {s.where()}: {exc}")
+    path = save_user_config({"url": args.url, "team": s.team})
+    print(f"Connected to {s.where()} as team '{s.team}'. Saved privately to {path} (only you can read it).")
+    print("Now run `hivemind init <repo> --agent claude|kiro|codex` in your project.")
+
+
+def cmd_invite(args: argparse.Namespace) -> None:
+    from .db import load_user_config
+
+    cfg = load_user_config()
+    if not cfg.get("url"):
+        sys.exit("Not connected to a hosted database yet. Run `hivemind connect <url> --team <name>` first.")
+    team = args.team or cfg.get("team", "demo")
+    print("Send this to your teammate privately (it contains the database password):\n")
+    print("  git clone https://github.com/Quantapixel/memofull ~/memofull && cd ~/memofull && uv sync")
+    print(f"  uv run --project ~/memofull hivemind --team {team} connect '{cfg['url']}'")
+    print("  cd <your clone of the project> && uv run --project ~/memofull hivemind init . --agent claude   # or kiro, codex")
 
 
 def cmd_status(args: argparse.Namespace) -> None:
@@ -141,6 +167,13 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--interval", type=float, default=1.0)
     p.set_defaults(func=cmd_watch)
 
+    p = sub.add_parser("connect", help="save a hosted FalkorDB URL (redis:// or rediss://) for this user")
+    p.add_argument("url")
+    p.set_defaults(func=cmd_connect)
+
+    p = sub.add_parser("invite", help="print the commands a teammate runs to join")
+    p.set_defaults(func=cmd_invite)
+
     p = sub.add_parser("status", help="print open tasks")
     p.set_defaults(func=cmd_status)
 
@@ -148,7 +181,7 @@ def main(argv: list[str] | None = None) -> None:
     try:
         args.func(args)
     except ConnectionError as exc:
-        sys.exit(f"cannot reach FalkorDB: {exc}. Start it with `podman compose up -d`.")
+        sys.exit(f"cannot reach FalkorDB: {exc}. Check `hivemind connect`, or start a local one with `docker compose up -d`.")
 
 
 if __name__ == "__main__":

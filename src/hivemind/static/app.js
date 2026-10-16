@@ -82,14 +82,44 @@ const pathArrows = (r) => {
   return r.path.slice(1).map(() => "→");
 };
 
-async function api(path, opts = {}) {
+let askingForKey = null;
+async function api(path, opts = {}, withTeam = true) {
   const sep = path.includes("?") ? "&" : "?";
-  const res = await fetch(`/api/${path}${sep}team=${encodeURIComponent(S.team)}`, {
-    headers: { "content-type": "application/json" }, ...opts,
-  });
-  const data = await res.json();
+  const url = `/api/${path}${withTeam ? `${sep}team=${encodeURIComponent(S.team)}` : ""}`;
+  const key = store.get("key", "");
+  const res = await fetch(url, { ...opts, headers: { "content-type": "application/json", ...(key ? { authorization: `Bearer ${key}` } : {}) } });
+  const data = await res.json().catch(() => ({}));
+  if (res.status === 401 && data.auth) {
+    await askForKey(!!key);
+    return api(path, opts, withTeam);
+  }
   if (!res.ok) throw new Error(data.error || res.statusText);
   return data;
+}
+// A hosted dashboard is protected by the team's access code.
+function askForKey(wrong) {
+  if (askingForKey) return askingForKey;
+  askingForKey = new Promise((resolve) => {
+    const f = $("#modalForm");
+    f.dataset.kind = "access";
+    f.innerHTML = `<h2>Team access code</h2>
+      <p class="lede">This dashboard shows a team's shared memory. Ask whoever set it up for the access code.</p>
+      <label>Access code</label><input name="key" type="password" required autocomplete="current-password">
+      <div class="err">${wrong ? "That code was not accepted." : ""}</div>
+      <div class="foot"><button class="btn primary" type="submit">Open dashboard</button></div>`;
+    $("#modal").hidden = false;
+    f.querySelector("input").focus();
+    const done = (e) => {
+      e.preventDefault();
+      store.set("key", f.querySelector("input").value.trim());
+      f.removeEventListener("submit", done, true);
+      $("#modal").hidden = true;
+      askingForKey = null;
+      resolve();
+    };
+    f.addEventListener("submit", done, true);
+  });
+  return askingForKey;
 }
 function toast(text, ic = "check") {
   const el = document.createElement("div");
@@ -985,6 +1015,7 @@ function openForm(kind, preset = {}) {
 }
 async function submitForm(e) {
   e.preventDefault();
+  if (e.target.dataset.kind === "access") return;
   const f = e.target, kind = f.dataset.kind, v = Object.fromEntries(new FormData(f));
   const list = (s) => (s || "").split(",").map((x) => x.trim()).filter(Boolean);
   S.me = v.dev.trim(); store.set("me", S.me);
@@ -1001,7 +1032,7 @@ async function submitForm(e) {
 
 // ---------------------------------------------------------------- teams
 async function loadTeams() {
-  const r = await fetch("/api/teams").then((x) => x.json());
+  const r = await api("teams", {}, false);
   if (!S.team) S.team = r.default;
   if (!r.teams.includes(S.team) && r.teams.length) S.team = r.teams.includes(r.default) ? r.default : r.teams[0];
   $("#teamMenu").innerHTML = r.teams.map((t) => `<button data-team="${esc(t)}" class="${t === S.team ? "on" : ""}"><span>${esc(t)}</span>${t === S.team ? '<i data-icon="check"></i>' : ""}</button>`).join("")
@@ -1097,7 +1128,7 @@ $("#memKind").addEventListener("click", (e) => {
 $("#memSearch").addEventListener("input", renderMemory);
 $("#memAdd").addEventListener("click", () => openForm(S.memKind === "conventions" ? "convention" : "decision"));
 $("#modalForm").addEventListener("submit", submitForm);
-$("#modal").addEventListener("mousedown", (e) => { if (e.target.id === "modal") $("#modal").hidden = true; });
+$("#modal").addEventListener("mousedown", (e) => { if (e.target.id === "modal" && !askingForKey) $("#modal").hidden = true; });
 $("#palette").addEventListener("mousedown", (e) => { if (e.target.id === "palette") closePalette(); });
 $("#paletteInput").addEventListener("input", () => { pIndex = 0; renderPalette(); });
 $("#paletteList").addEventListener("click", (e) => { const it = e.target.closest(".p-item"); if (it) runPaletteItem(+it.dataset.i); });
@@ -1115,7 +1146,7 @@ document.addEventListener("keydown", (e) => {
     else if (e.key === "Enter") { e.preventDefault(); runPaletteItem(pIndex); }
     return;
   }
-  if (!$("#modal").hidden) { if (e.key === "Escape") $("#modal").hidden = true; return; }
+  if (!$("#modal").hidden) { if (e.key === "Escape" && !askingForKey) $("#modal").hidden = true; return; }
   if (typing) return;
   if (e.key === "Escape") { if (S.focusDev) setFocusDev(null); clearSelection(); }
   else if (e.key === "/") { e.preventDefault(); openPalette(); }

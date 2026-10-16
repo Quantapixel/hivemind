@@ -1,15 +1,20 @@
 """Live view of a team graph: code, who is working where, conflicts and memory.
 
 Every endpoint takes ?team=<name> so one server can show any team graph in
-the FalkorDB instance.
+the FalkorDB instance. Runs locally (`hivemind ui`) or as a hosted
+dashboard (deploy/vercel); hosted, every API call needs the team's access
+code and only the allowed teams are visible.
 """
 
 from __future__ import annotations
 
 from pathlib import Path
 
-import uvicorn
-from falkordb import FalkorDB
+import hmac
+import os
+
+from redis import exceptions as redis_errors
+
 from starlette.applications import Starlette
 from starlette.requests import Request
 from starlette.responses import FileResponse, JSONResponse
@@ -17,7 +22,7 @@ from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 
 from .brain import Brain
-from .db import Settings, connect, graph_name, rows
+from .db import Settings, connect, graph_name, open_db, rows
 
 STATIC = Path(__file__).parent / "static"
 PREFIX = graph_name("")
@@ -26,17 +31,28 @@ PREFIX = graph_name("")
 class Teams:
     """One connection per team graph, plus cached graph-algorithm scores."""
 
-    def __init__(self, settings: Settings):
+    def __init__(self, settings: Settings, allowed: list[str] | None = None):
         self.settings = settings
-        self.db = FalkorDB(host=settings.host, port=settings.port, password=settings.password)
+        self.allowed = allowed
+        self._db = None
         self._brains: dict[str, Brain] = {}
         self._metrics: dict[str, tuple[tuple, dict]] = {}
 
+    @property
+    def db(self):
+        # Connect on first use, so the app starts even if the database is down.
+        if self._db is None:
+            self._db = open_db(self.settings)
+        return self._db
+
     def names(self) -> list[str]:
-        return sorted(g[len(PREFIX) :] for g in self.db.list_graphs() if g.startswith(PREFIX))
+        names = sorted(g[len(PREFIX) :] for g in self.db.list_graphs() if g.startswith(PREFIX))
+        return [n for n in names if self.allowed is None or n in self.allowed]
 
     def brain(self, team: str | None) -> Brain:
         team = team or self.settings.team
+        if self.allowed is not None and team not in self.allowed:
+            raise PermissionError(f"team {team!r} is not shared on this dashboard")
         if team not in self._brains:
             s = Settings(**{**self.settings.__dict__, "team": team})
             self._brains[team] = Brain(connect(s), s.dev, "ui")
@@ -320,8 +336,8 @@ def memory(teams: Teams, team: str) -> dict:
     }
 
 
-def create_app(settings: Settings) -> Starlette:
-    teams = Teams(settings)
+def create_app(settings: Settings, access_key: str | None = None, allowed_teams: list[str] | None = None) -> Starlette:
+    teams = Teams(settings, allowed_teams)
 
     def team_of(request: Request) -> str:
         return request.query_params.get("team") or settings.team
@@ -366,7 +382,25 @@ def create_app(settings: Settings) -> Starlette:
             return JSONResponse({"error": f"unknown write {kind}"}, status_code=404)
         return JSONResponse(out)
 
+    async def guard(request: Request, call_next):
+        if access_key and request.url.path.startswith("/api/"):
+            given = request.headers.get("authorization", "").removeprefix("Bearer ").strip()
+            if not hmac.compare_digest(given.encode(), access_key.encode()):
+                return JSONResponse({"error": "access code required", "auth": True}, status_code=401)
+        try:
+            return await call_next(request)
+        except PermissionError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=403)
+        except (redis_errors.ConnectionError, redis_errors.TimeoutError, ConnectionError, TimeoutError, OSError) as exc:
+            teams._db = None
+            teams._brains.clear()
+            return JSONResponse({"error": f"database unreachable: {exc}"}, status_code=503)
+
+    from starlette.middleware import Middleware
+    from starlette.middleware.base import BaseHTTPMiddleware
+
     return Starlette(
+        middleware=[Middleware(BaseHTTPMiddleware, dispatch=guard)],
         routes=[
             Route("/", index),
             Route("/api/teams", api_teams),
@@ -380,6 +414,21 @@ def create_app(settings: Settings) -> Starlette:
     )
 
 
-def run(settings: Settings, host: str = "127.0.0.1", port: int = 8765) -> None:
+def app_from_env() -> Starlette:
+    """The hosted dashboard. Configure with FALKORDB_URL, HIVEMIND_DASHBOARD_KEY
+    (required) and optionally HIVEMIND_TEAMS (comma-separated)."""
+    key = os.environ.get("HIVEMIND_DASHBOARD_KEY", "")
+    if len(key) < 8:
+        raise RuntimeError("Set HIVEMIND_DASHBOARD_KEY (8+ characters) before hosting the dashboard.")
+    allowed = [t.strip() for t in os.environ.get("HIVEMIND_TEAMS", "").split(",") if t.strip()] or None
+    settings = Settings.from_env()
+    if allowed:
+        settings.team = allowed[0]
+    return create_app(settings, access_key=key, allowed_teams=allowed)
+
+
+def run(settings: Settings, host: str = "127.0.0.1", port: int = 8765, access_key: str | None = None) -> None:
+    import uvicorn
+
     print(f"Hivemind live view: http://{host}:{port}/?team={settings.team}")
-    uvicorn.run(create_app(settings), host=host, port=port, log_level="warning")
+    uvicorn.run(create_app(settings, access_key=access_key), host=host, port=port, log_level="warning")

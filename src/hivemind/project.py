@@ -45,20 +45,28 @@ def default_dev(cwd: str | Path | None = None) -> str:
 
 
 def load_settings(root: Path) -> Settings:
+    """Team from the project file; where to connect from the environment or
+    the developer's private `hivemind connect` config, else the project file."""
     cfg = json.loads((root / MARKER).read_text())
-    return Settings(
-        host=os.environ.get("FALKORDB_HOST", cfg.get("host", "localhost")),
-        port=int(os.environ.get("FALKORDB_PORT", cfg.get("port", 6379))),
-        password=os.environ.get("FALKORDB_PASSWORD") or cfg.get("password") or None,
-        team=os.environ.get("HIVEMIND_TEAM", cfg.get("team", "demo")),
-        dev=default_dev(root),
-    )
+    s = Settings.from_env()
+    s.team = os.environ.get("HIVEMIND_TEAM") or cfg.get("team") or s.team
+    if not s.url and "FALKORDB_HOST" not in os.environ:
+        s.host = cfg.get("host", s.host)
+        s.port = int(cfg.get("port", s.port))
+    s.dev = default_dev(root)
+    return s
 
 
 def write_config(root: Path, settings: Settings) -> Path:
+    """Only non-secret settings go in the repo: the team, and a host when
+    connecting without a URL (a URL carries the password, so it stays in the
+    developer's private config)."""
     path = root / MARKER
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps({"team": settings.team, "host": settings.host, "port": settings.port}, indent=2) + "\n")
+    data: dict = {"team": settings.team}
+    if not settings.url:
+        data.update(host=settings.host, port=settings.port)
+    path.write_text(json.dumps(data, indent=2) + "\n")
     (path.parent / ".gitignore").write_text("session.*\n")
     return path
 

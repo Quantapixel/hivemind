@@ -3,11 +3,16 @@
 Uses the stdlib `ast` module so indexing has no native dependencies. Call
 resolution is name based: a call to `foo()` or `x.foo()` links to every
 function named `foo` in the repo, preferring one in the same file.
+
+Each function carries a structural hash (its AST without positions), so
+re-indexing a file after an agent edits it tells us exactly which functions
+changed, independent of which agent made the edit.
 """
 
 from __future__ import annotations
 
 import ast
+import hashlib
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -23,6 +28,7 @@ class FunctionInfo:
     file: str
     lineno: int
     end_lineno: int
+    hash: str = ""
     calls: set[str] = field(default_factory=set)
 
 
@@ -60,6 +66,7 @@ class _Visitor(ast.NodeVisitor):
             file=self.info.path,
             lineno=node.lineno,
             end_lineno=node.end_lineno or node.lineno,
+            hash=hashlib.sha1(ast.dump(node).encode()).hexdigest()[:16],
         )
         self.info.functions.append(fn)
         self.scope.append(node.name)
@@ -96,6 +103,17 @@ class _Visitor(ast.NodeVisitor):
                 self.info.imports.add(f"{base}.{alias.name}")
 
 
+def parse_file(root: Path, rel: str) -> FileInfo | None:
+    path = root / rel
+    try:
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=rel)
+    except (OSError, SyntaxError, UnicodeDecodeError, ValueError):
+        return None
+    info = FileInfo(path=Path(rel).as_posix(), module=_module_name(Path(rel)))
+    _Visitor(info).visit(tree)
+    return info
+
+
 def parse_repo(root: Path) -> list[FileInfo]:
     root = root.resolve()
     files: list[FileInfo] = []
@@ -103,13 +121,9 @@ def parse_repo(root: Path) -> list[FileInfo]:
         rel = path.relative_to(root)
         if any(part in SKIP_DIRS for part in rel.parts):
             continue
-        try:
-            tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(rel))
-        except (SyntaxError, UnicodeDecodeError):
-            continue
-        info = FileInfo(path=rel.as_posix(), module=_module_name(rel))
-        _Visitor(info).visit(tree)
-        files.append(info)
+        info = parse_file(root, rel.as_posix())
+        if info:
+            files.append(info)
     return files
 
 
@@ -148,17 +162,7 @@ def index_repo(graph: Graph, root: Path, batch: int = 500) -> dict[str, int]:
     calls, imports = resolve(files)
 
     file_rows = [{"path": f.path, "module": f.module} for f in files]
-    fn_rows = [
-        {
-            "qname": fn.qname,
-            "name": fn.name,
-            "file": fn.file,
-            "lineno": fn.lineno,
-            "end_lineno": fn.end_lineno,
-        }
-        for f in files
-        for fn in f.functions
-    ]
+    fn_rows = [_fn_row(fn) for f in files for fn in f.functions]
 
     def chunks(items: list) -> list[list]:
         return [items[i : i + batch] for i in range(0, len(items), batch)] or [[]]
@@ -173,8 +177,8 @@ def index_repo(graph: Graph, root: Path, batch: int = 500) -> dict[str, int]:
             """
             UNWIND $rows AS r
             MERGE (fn:Function {qname: r.qname})
-            SET fn.name = r.name, fn.file = r.file,
-                fn.lineno = r.lineno, fn.end_lineno = r.end_lineno
+            SET fn.name = r.name, fn.file = r.file, fn.lineno = r.lineno,
+                fn.end_lineno = r.end_lineno, fn.hash = r.hash, fn.calls = r.calls
             WITH fn, r
             MATCH (f:File {path: r.file})
             MERGE (f)-[:DEFINES]->(fn)
@@ -210,3 +214,77 @@ def index_repo(graph: Graph, root: Path, batch: int = 500) -> dict[str, int]:
         )
 
     return {"files": len(files), "functions": len(fn_rows), "calls": len(calls), "imports": len(imports)}
+
+
+def _fn_row(fn: FunctionInfo) -> dict:
+    return {
+        "qname": fn.qname,
+        "name": fn.name,
+        "file": fn.file,
+        "lineno": fn.lineno,
+        "end_lineno": fn.end_lineno,
+        "hash": fn.hash,
+        "calls": sorted(fn.calls),
+    }
+
+
+def index_file(graph: Graph, root: Path, rel: str) -> dict[str, list[str]]:
+    """Re-index one file after it changed and report which functions were
+    added, changed (different structure) or removed."""
+    rel = Path(rel).as_posix()
+    if not rel.endswith(".py"):
+        return {"added": [], "changed": [], "removed": []}
+    before = {r[0]: r[1] for r in graph.query("MATCH (fn:Function {file: $f}) RETURN fn.qname, fn.hash", {"f": rel}).result_set}
+    info = parse_file(root.resolve(), rel) if (root / rel).exists() else None
+    if info is None and (root / rel).exists():
+        return {"added": [], "changed": [], "removed": []}  # mid-edit syntax error: keep the last good index
+    fns = info.functions if info else []
+    after = {fn.qname: fn.hash for fn in fns}
+
+    if info:
+        graph.query("MERGE (f:File {path: $p}) SET f.module = $m", {"p": rel, "m": info.module})
+        graph.query(
+            """
+            UNWIND $rows AS r
+            MERGE (fn:Function {qname: r.qname})
+            SET fn.name = r.name, fn.file = r.file, fn.lineno = r.lineno,
+                fn.end_lineno = r.end_lineno, fn.hash = r.hash, fn.calls = r.calls
+            WITH fn
+            MATCH (f:File {path: $p})
+            MERGE (f)-[:DEFINES]->(fn)
+            """,
+            {"rows": [_fn_row(fn) for fn in fns], "p": rel},
+        )
+    removed = [q for q in before if q not in after]
+    if removed:
+        graph.query("MATCH (fn:Function) WHERE fn.qname IN $q DETACH DELETE fn", {"q": removed})
+    if info is None:
+        graph.query("MATCH (f:File {path: $p}) DETACH DELETE f", {"p": rel})
+
+    # Outgoing calls from this file: same-file definitions win, else any match.
+    graph.query("MATCH (a:Function {file: $p})-[c:CALLS]->() DELETE c", {"p": rel})
+    graph.query(
+        """
+        MATCH (a:Function {file: $p})
+        UNWIND a.calls AS name
+        MATCH (b:Function {name: name}) WHERE b <> a
+        WITH a, name, collect(b) AS targets
+        WITH a, [t IN targets WHERE t.file = a.file] AS local, targets
+        UNWIND CASE WHEN size(local) > 0 THEN local ELSE targets END AS t
+        MERGE (a)-[:CALLS]->(t)
+        """,
+        {"p": rel},
+    )
+    # Incoming calls to functions that are new to the graph.
+    added = [q for q in after if q not in before]
+    if added:
+        graph.query(
+            """
+            MATCH (t:Function) WHERE t.qname IN $q
+            MATCH (c:Function) WHERE t.name IN c.calls AND c <> t AND c.file <> t.file
+            MERGE (c)-[:CALLS]->(t)
+            """,
+            {"q": added},
+        )
+    changed = [q for q in after if q in before and before[q] != after[q]]
+    return {"added": added, "changed": changed, "removed": removed}

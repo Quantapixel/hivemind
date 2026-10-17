@@ -1,62 +1,77 @@
 ---
-title: "My AI agent didn't know what yours was doing, so I gave them one shared brain"
-subtitle: "Building Hivemind: a team memory for Claude Code, Kiro and Codex, stored as a FalkorDB graph"
+title: "Hivemind: shared memory for coding agents, built on FalkorDB"
+subtitle: "How I used a FalkorDB graph to let Claude Code, Kiro and Codex share context across a team"
 tags: falkordb, ai, graphdatabase, hackathon
 cover: https://raw.githubusercontent.com/Quantapixel/hivemind/main/docs/blog/images/cover.png
 ---
 
-Picture two coding agents on the same team. One is rewriting a token validator. The other, on a teammate's laptop, is adding a feature that depends on how that validator used to behave. Neither agent knows the other exists, and Git stays quiet because they're in different files. Someone finds out from a failing test a few days later.
+On many teams, each developer now works with their own coding agent: Claude Code, Kiro, Codex or something else. These agents don't share anything with each other. One agent doesn't know what another is changing, and each session starts without any memory of earlier ones. If one agent found yesterday that an approach breaks the tests, another agent may try the same approach today.
 
-Nothing about that is unusual anymore. Everyone on a team has their own agent (Claude Code, Kiro, Codex), each agent is good at its job, and none of them share anything. Every session starts from zero. If my agent learned yesterday that an approach breaks production, yours will try it again today.
+For [Graph Hacks](https://www.wemakedevs.org/hackathons/falkordb) (WeMakeDevs × FalkorDB) I built **Hivemind**, a shared memory that all of these agents read from and write to. It is stored as a graph in FalkorDB. This post explains the problem, how the system works, the main Cypher queries, and what I learned while building it.
 
-For [Graph Hacks](https://www.wemakedevs.org/hackathons/falkordb) (WeMakeDevs × FalkorDB) I built **Hivemind**, a shared memory that all of those agents read and write. It lives in a FalkorDB graph, and this post covers how it works, what the graph queries look like, and what I got wrong along the way.
+There is a live demo that runs in the browser without sign-up. I refer to specific steps of it below:
 
-The demo runs in your browser with no sign-up, and I'll point to specific steps of it as we go:
-
-**▶ [hivemind-live-demo.vercel.app](https://hivemind-live-demo.vercel.app)**
+**[hivemind-live-demo.vercel.app](https://hivemind-live-demo.vercel.app)**
 
 {% embed https://github.com/Quantapixel/hivemind %}
 
-## The scenario
+## The problem
 
-The demo follows a fictional team of five working on a small shop backend: Priya (tech lead, Claude Code), Marco (Kiro), Aisha (Codex), Ken (Claude Code) and Lena (Kiro).
+The demo uses a fictional team of five working on a small shop backend: Priya (tech lead, Claude Code), Marco (Kiro), Aisha (Codex), Ken (Claude Code) and Lena (Kiro).
 
-Marco asks Kiro to add JWT support, and Kiro starts changing `validate_token()` in `shop/tokens.py`. A few minutes later Aisha asks Codex to rate-limit `checkout()` in `shop/orders.py`. Different file, different person, different agent.
+Marco asks Kiro to add JWT support, and Kiro starts changing `validate_token()` in `shop/tokens.py`. Shortly after, Aisha asks Codex to add rate limiting to `checkout()` in `shop/orders.py`.
 
-But `checkout()` calls `current_user()`, which calls `validate_token()`. Aisha is building on top of code that is being rewritten while she works.
+These are different files, but `checkout()` calls `current_user()`, which calls `validate_token()`. Aisha's change depends on code that Marco is changing at the same time.
 
-{% details Quick check: which of these would Git catch? %}
-None of them. Marco and Aisha edit different files, so there's no merge conflict. Marco's failed attempt never touches Git at all. Neither does Priya's decision from last month that tokens must stay HMAC-signed until the mobile v3 app ships. Git tracks text, not intent, and all three problems here are about intent.
+{% details Which of these would Git catch? %}
+None of them. Marco and Aisha edit different files, so there is no merge conflict. Marco's failed attempt is never committed. Priya's earlier decision that tokens must stay HMAC-signed until the mobile v3 app ships isn't in Git either. Git tracks changes to text, and these problems are about how the code is connected and what the team already knows.
 {% enddetails %}
 
-It gets worse over the afternoon. Marco's first idea, swapping the HMAC check for a PyJWT decode, fails `test_refresh_session` because users with old tokens get logged out. He tries a variation and hits the same wall. Then he goes home, and the next morning Lena picks up the task with an agent that knows none of this.
+Later, Marco's first approach (replacing the HMAC check with a PyJWT decode) fails `test_refresh_session`, because users with old tokens get logged out. A second try fails the same way. He stops for the day, and the next morning Lena continues the task with an agent that has none of this information.
 
 ![Without shared memory vs with Hivemind](https://raw.githubusercontent.com/Quantapixel/hivemind/main/docs/blog/images/problem.png)
 
-I looked at what teams currently do about this. Git and code review catch problems after the work is finished. `CLAUDE.md` and `AGENTS.md` files are static and hand-maintained, so they never know what's happening right now. Each agent's built-in memory stays on one laptop inside one tool. Asking in Slack works until someone forgets to ask, and agents never ask.
+Existing approaches cover parts of this. Git and code review find problems after the work is done. `CLAUDE.md` and `AGENTS.md` files are written by hand and don't reflect work in progress. Each agent's own memory stays on one machine and inside one tool. Asking teammates in chat depends on people remembering to ask.
 
-## Memory should be attached to code, not chats
+## Approach: attach memory to the code
 
-The design came together once I noticed that every memory worth sharing is about a specific function. "Marco is changing `validate_token`." "PyJWT decode on `validate_token` broke the refresh test." "`tokens.py` stays HMAC until v3."
+Most of the information worth sharing is about a specific function: who is changing `validate_token`, what was tried on it, and which decisions apply to it. So Hivemind attaches each piece of memory to the functions it is about.
 
-If memories hang off functions, and functions are connected by calls, then "what should my agent know before it edits `checkout`?" turns into "what is connected to `checkout`?" That's a graph traversal, and it's why FalkorDB fit.
+Functions are connected by calls. That means the question "what should my agent know before editing `checkout`?" becomes "what is connected to `checkout`?", which is a graph traversal.
 
-The questions an agent needs answered all share that shape. Is anyone changing code that mine calls? Follow `CALLS` edges until you reach someone's claim. What has been tried near this function? Look one hop out for attempts. What breaks if I change it? Walk callers backwards. In SQL each of those is a recursive join, run on every agent step. In Cypher each is one short query, and FalkorDB answers them fast enough to sit in front of every single edit, which was the bar. If the check is slow, people turn it off.
+The other questions an agent needs answered have the same form:
 
-A few other FalkorDB features ended up mattering more than I expected. Multi-graph support gives each team its own graph (`hivemind_shop`, `hivemind_payments`) inside one database. The built-in algorithms (`algo.pageRank`, `algo.betweenness`, `shortestPath`) power the dashboard without extra infrastructure. And because it speaks the Redis protocol and has a free cloud tier, every agent on every laptop connects straight to it. There's no Hivemind server anywhere.
+- Is anyone changing code that mine calls? Follow `CALLS` edges until reaching a teammate's claim.
+- What has been tried near this function? Look one hop out for attempts.
+- What could break if I change it? Follow callers backwards.
 
-## The graph
+In SQL these would be recursive joins on every agent step. In Cypher each one is a short query, and FalkorDB returns them quickly enough to run before every edit.
 
-There are two layers. The bottom one is the code itself, parsed from the repo. The top one is what the team did, attached to the functions it concerns.
+Some other FalkorDB features were useful:
+
+- **Multi-graph support.** Each team gets its own graph (`hivemind_shop`, `hivemind_payments`) in one database.
+- **Built-in algorithms.** `algo.pageRank`, `algo.betweenness` and `shortestPath` power the dashboard.
+- **Redis protocol and a free cloud tier.** Every agent connects to the database directly, so there is no separate Hivemind server.
+
+## The data model
+
+The graph has two layers. The code layer is parsed from the repository. The team memory layer records what people and agents did, linked to the relevant functions.
 
 ![The Hivemind graph data model](https://raw.githubusercontent.com/Quantapixel/hivemind/main/docs/blog/images/graph-model.png)
 
-Marco ran a Kiro session that works on the task "Add JWT support". The task claims `validate_token`, which is how the graph knows who is changing it right now. The session made an attempt that failed twice and touched `validate_token`, so the failure sits on the code instead of in a chat log. Later, Lena's passing attempt resolves it, and her decision supersedes Priya's.
+In the example:
 
-The code layer comes from Python's `ast` module: every function, what it calls and what each file imports, written in batches with `UNWIND` and `MERGE`. Each function also stores a hash of its syntax tree with positions stripped out. When an agent edits a file, Hivemind re-indexes only that file and compares hashes, so it knows exactly which functions changed. Reformatting or editing a comment doesn't count. Changing a condition does.
+- Marco ran a Kiro session that works on the task "Add JWT support".
+- The task claims `validate_token`, which records who is currently changing it.
+- The session made an attempt that failed twice and touched `validate_token`.
+- Later, Lena's passing attempt resolves that failure, and her decision supersedes Priya's earlier one.
 
-{% details How calls get resolved (the Cypher) %}
-When a function calls `validate_token`, the indexer has to pick which `validate_token` that means. It prefers one defined in the same file and falls back to any function with that name:
+The code layer is built with Python's `ast` module. It records every function, the functions it calls, and each file's imports, and writes them in batches using `UNWIND` and `MERGE`.
+
+Each function also stores a hash of its syntax tree, without line numbers. When an agent edits a file, Hivemind re-indexes only that file and compares the hashes, which shows exactly which functions changed. Formatting changes and comment edits don't change the hash. Logic changes do.
+
+{% details How function calls are resolved %}
+When a function calls `validate_token`, the indexer needs to decide which `validate_token` is meant. It prefers one defined in the same file, and otherwise uses any function with that name:
 
 ```cypher
 MATCH (a:Function {file: $file})
@@ -67,12 +82,12 @@ UNWIND CASE WHEN size(local) > 0 THEN local ELSE targets END AS t
 MERGE (a)-[:CALLS]->(t)
 ```
 
-It isn't a type checker, and dynamic dispatch can fool it. For ordinary application code it's right nearly all the time, and it's cheap enough to rerun after every edit.
+This is not a type checker, and dynamic dispatch can mislead it. For typical application code it is accurate enough, and it is cheap to rerun after each edit.
 {% enddetails %}
 
-## Catching the conflict before the first edit
+## Detecting conflicts before an edit
 
-Before an agent edits anything, a hook asks the graph one question: starting from the functions I'm about to change, can I reach something a teammate has claimed within three calls?
+Before an agent edits a file, a hook checks whether any of the functions being changed are within three calls of a function that a teammate has claimed:
 
 ```cypher
 MATCH (t:Function) WHERE t.qname IN $mine
@@ -82,41 +97,57 @@ RETURN t.qname, o.qname, i.dev, i.description,
        [n IN nodes(p) | n.qname] AS path
 ```
 
-`[:CALLS*1..3]` is a variable-length path: one to three call edges in a single pattern. The useful part is `nodes(p)`, which returns the path itself, so the agent can explain *why* there's a conflict instead of just raising an alarm.
+`[:CALLS*1..3]` matches paths of one to three call edges. `nodes(p)` returns the path itself, so the agent can show the developer how the two pieces of code are connected.
 
 ![How Hivemind catches a conflict before anyone writes code](https://raw.githubusercontent.com/Quantapixel/hivemind/main/docs/blog/images/conflict.png)
 
-The real check runs three variants: the same function, code I call, and code that calls mine. It keeps the shortest path for each pair, because the shortest chain is the easiest explanation for a human to follow.
+The full check runs three variants:
 
-When it finds something, the hook pauses the edit once and hands the agent that explanation. The agent tells the developer, and if they go ahead, the retry goes through. The acknowledgement is stored as a small node in the graph so the same warning doesn't repeat. I went back and forth on blocking harder, but a tool that stops people from working gets uninstalled by Friday.
+1. The same function
+2. Code that my code calls
+3. Code that calls my code
 
-> **See it live:** open the [demo](https://hivemind-live-demo.vercel.app), press **Next step** until step 4 ("Aisha starts rate limiting in Codex"), and watch the red path appear between `checkout` and `validate_token`.
+For each pair it keeps the shortest path, which is the easiest to read.
 
-![Live demo: a conflict appears the moment Aisha starts](https://raw.githubusercontent.com/Quantapixel/hivemind/main/docs/blog/images/conflict-demo.gif)
+If a conflict is found, the hook pauses the edit once and returns the explanation to the agent, which passes it on to the developer. If the developer continues, the next attempt goes through. The acknowledgement is stored as a node so the same warning isn't shown again. I chose a one-time warning over a hard block, because a hard block would get in the way of normal work.
 
-## Recording memory without anyone asking
+> **In the demo:** press **Next step** until step 4 ("Aisha starts rate limiting in Codex"). A red path appears between `checkout` and `validate_token`.
 
-My first version gave agents MCP tools like `record_attempt` and trusted them to call them. They mostly didn't. An agent in the middle of a task calls the tools it needs for the task, and bookkeeping isn't one of them. I had a well-designed memory that stayed nearly empty.
+![Live demo: a conflict appears when Aisha starts](https://raw.githubusercontent.com/Quantapixel/hivemind/main/docs/blog/images/conflict-demo.gif)
 
-So capture moved into hooks, which Claude Code, Kiro and Codex all support. The agent doesn't decide anything. The prompt becomes the session's task. Before an edit, the functions being edited get claimed and checked for conflicts. After an edit, the file is re-indexed and the changed functions are recorded. When a test command runs after code has changed, the result becomes an attempt on exactly those functions. When the agent stops, its own summary becomes the task's progress note.
+## Recording memory automatically
 
-Here's Marco's failure, recorded without anyone typing anything into Hivemind:
+The first version gave agents MCP tools such as `record_attempt` and relied on them to call these tools. In practice they rarely did, because they focus on the task they were given. The memory stayed mostly empty.
 
-1. Prompt: "Add JWT support to auth tokens" becomes a task.
-2. Kiro edits `tokens.py`. Re-indexing shows `validate_token`'s hash changed.
-3. Kiro runs `pytest`. Exit code 1, and `test_refresh_session` is pulled from the output.
-4. Changed function plus failing test becomes an `Attempt` that `TOUCHED` `validate_token`.
-5. When Kiro then explains the failure in its own words, the explanation is merged into that attempt rather than stored as a second memory.
+I moved recording into hooks, which Claude Code, Kiro and Codex all support. The hooks run at fixed points:
 
-{% details The annoying part: three agents, three payload formats %}
-Claude Code sends `PascalCase` events (`PreToolUse`, `PostToolUseFailure`) and tools called `Edit`, `Write` and `Bash`. Kiro sends `camelCase` events (`preToolUse`, `agentSpawn`) with tools called `fs_write` and `execute_bash`, and puts the exit status inside `tool_response.result[0]`. Codex uses Claude-style event names, but its tool names change between versions (`shell`, `exec_command`, `apply_patch`), so edits and commands are recognised by their inputs rather than by name.
+- When the agent receives a prompt, it becomes the session's task.
+- Before an edit, the functions being edited are claimed and checked for conflicts.
+- After an edit, the file is re-indexed and the changed functions are recorded.
+- When tests run after code changes, the result is recorded as an attempt on those functions.
+- When the agent stops, its summary is saved as the task's progress note.
 
-A small normalisation layer turns all of them into one event shape. I wrote it from real payloads captured in real sessions, which are now test fixtures, because the documentation didn't cover every case.
+For example, Marco's failure is recorded like this:
 
-Test detection is a regex over the command (`pytest`, `unittest`, `jest`, `go test`, `cargo test` and roughly twenty more) plus the exit code, with a pass over the output to pull out the name of the failing test.
+1. The prompt "Add JWT support to auth tokens" becomes a task.
+2. Kiro edits `tokens.py`. Re-indexing shows that the hash of `validate_token` changed.
+3. Kiro runs `pytest`. The exit code is 1, and `test_refresh_session` is read from the output.
+4. The changed function and the failing test become an `Attempt` linked to `validate_token`.
+5. If Kiro then describes the failure in its own words, that description is added to the same attempt instead of creating a second one.
+
+{% details Handling three different hook formats %}
+Claude Code sends `PascalCase` events (`PreToolUse`, `PostToolUseFailure`), and its tools are called `Edit`, `Write` and `Bash`.
+
+Kiro sends `camelCase` events (`preToolUse`, `agentSpawn`). Its tools are called `fs_write` and `execute_bash`, and it puts the exit status in `tool_response.result[0]`.
+
+Codex uses Claude-style event names, but its tool names differ between versions (`shell`, `exec_command`, `apply_patch`). So edits and commands are identified by their inputs instead of by tool name.
+
+A small normalisation layer converts all of these into one event format. I based it on payloads captured from real sessions, which are now used as test fixtures, because the documentation didn't cover every case.
+
+Test runs are detected by matching the command (`pytest`, `unittest`, `jest`, `go test`, `cargo test` and others) and checking the exit code. The name of the failing test is then parsed from the output.
 {% enddetails %}
 
-Before any agent edits a function, it gets everything tried on that function or its direct neighbours:
+Before an agent edits a function, it receives everything that was tried on that function or its direct neighbours:
 
 ```cypher
 MATCH (t:Function) WHERE t.qname IN $q
@@ -124,17 +155,19 @@ MATCH (t)-[:CALLS*0..1]-(fn:Function)<-[:TOUCHED]-(a:Attempt)
 RETURN a.summary, a.outcome, a.reason, a.count, a.devs, a.resolved
 ```
 
-So when Lena's agent opens `validate_token` the next morning, the first thing in its context is that PyJWT decode failed twice because tokens issued before the deploy get rejected. It skips that approach without being told.
+When Lena's agent opens `validate_token`, its context includes the fact that the PyJWT decode failed twice, and why.
 
-## Keeping the memory from turning into noise
+## Consolidating memory
 
-A memory that only grows becomes a pile of near-duplicate warnings, and noisy context makes agents worse. Hivemind consolidates when it writes.
+If every event became a new node, the memory would fill up with near-duplicates. Hivemind merges related entries when it writes them.
 
-![Memory that consolidates itself, step by step](https://raw.githubusercontent.com/Quantapixel/hivemind/main/docs/blog/images/memory-lifecycle.png)
+![How memory is consolidated, step by step](https://raw.githubusercontent.com/Quantapixel/hivemind/main/docs/blog/images/memory-lifecycle.png)
 
-If a new attempt has the same outcome on the same code with the same failing tests (or very similar wording), the existing attempt's counter goes up instead of a new node appearing. When tests pass on code that has open failures, those failures are marked fixed and linked to the fix with a `RESOLVES` edge. They stay in the graph as history: "failed twice, fixed by Lena by validating both formats" is exactly what the next person needs. A new decision on the same code `SUPERSEDES` the old one, so agents only see the current rule while `why()` can still show how it got there.
+- **Repeated failures merge.** If a new attempt has the same outcome on the same code, with the same failing tests or very similar wording, the existing attempt's count is increased instead of adding a node.
+- **Fixes resolve failures.** When tests pass on code with open failures, those failures are marked as fixed and linked to the fix with a `RESOLVES` edge. They stay in the graph as history.
+- **Decisions supersede decisions.** A new decision on the same code `SUPERSEDES` the old one. Agents see only the current decision, while `why()` can still show the earlier ones.
 
-{% details The Cypher behind "a fix resolves earlier failures" %}
+{% details Query: a passing attempt resolves earlier failures %}
 ```cypher
 MATCH (f:Attempt {outcome: 'failed'})-[:TOUCHED]->(fn:Function)
 WHERE fn.qname IN $q AND coalesce(f.resolved, false) = false
@@ -143,14 +176,16 @@ CREATE (a)-[:RESOLVES]->(f)
 SET f.resolved = true, f.resolved_dev = $dev
 ```
 
-The `DISTINCT` matters: one failure can touch several of the functions in `$q`, and without it you'd create duplicate `RESOLVES` edges.
+`DISTINCT` is needed because one failure can touch several of the functions in `$q`. Without it, duplicate `RESOLVES` edges would be created.
 {% enddetails %}
 
-> **See it live:** step 7 ("Marco tries again, same failure") shows the merge as a ×2 badge instead of a second entry. Step 10 ("Lena ships the fix") shows the failure turning into "fixed by Lena".
+> **In the demo:** step 7 ("Marco tries again, same failure") shows the merged failure with a ×2 badge. Step 10 ("Lena ships the fix") shows it marked as fixed by Lena.
 
 ## Handoffs
 
-When Marco stops for the day, his agent hands the task off with a note. When Lena resumes it, one query moves the `OWNS` edge to her and attaches her session. Nothing else moves. The claims, Marco's sessions, both failed attempts, his note and Priya's decision are all still connected to the task, so Lena's agent gets the whole history in one call.
+When Marco stops, his agent hands the task off with a note. When Lena resumes it, one query moves the `OWNS` edge to her and links her session to the task.
+
+Everything else stays connected to the task: the claims, Marco's sessions, both failed attempts, his note and Priya's decision. Lena's agent receives the full history in one call.
 
 {% details The resume query %}
 ```cypher
@@ -167,58 +202,93 @@ SET i.status = 'active'
 
 ![Live demo: Lena's fix resolves Marco's failure](https://raw.githubusercontent.com/Quantapixel/hivemind/main/docs/blog/images/fix-demo.gif)
 
-## Asking questions
+## Querying the memory
 
-Agents also get an MCP server with 14 tools for things hooks can't infer: starting and handing off tasks, recording decisions and conventions, and a few explain tools. Those last ones are each a single traversal. `blast_radius` walks callers backwards:
+Agents also get an MCP server with 14 tools, for things the hooks can't infer: starting and handing off tasks, recording decisions and conventions, and answering questions about the code. Three of these tools explain the code, and each is a single traversal:
 
-```cypher
-MATCH p = (caller:Function)-[:CALLS*1..3]->(t:Function {qname: $q})
-RETURN caller.qname, min(length(p)) AS distance
-```
+- **`blast_radius`** follows callers backwards:
+  ```cypher
+  MATCH p = (caller:Function)-[:CALLS*1..3]->(t:Function {qname: $q})
+  RETURN caller.qname, min(length(p)) AS distance
+  ```
+- **`who_knows`** ranks developers by their claims, attempts and decisions on a function and its neighbours.
+- **`why`** returns the current decision, the decision it replaced, all attempts, and the people involved. At the end of the demo, `why("validate_token")` returns the full history of the JWT change.
 
-`who_knows` ranks people by their claims, attempts and decisions on a function and its neighbours. `why` collects the current decision, the one it replaced, every attempt and who was involved. At the end of the demo, asking `why("validate_token")` returns the whole JWT story in one answer.
+> **In the demo:** at step 12, click `validate_token` on the map. The panel on the right shows the same information as `why`.
 
-> **See it live:** at step 12, click `validate_token` on the map. The inspector on the right is that same `why` view.
+## The dashboard
 
-The dashboard draws the codebase as a map: functions grouped by file, each developer's work outlined in their colour, conflict paths in red, memory as badges. Hotspots come from `algo.pageRank` (functions everything depends on) and `algo.betweenness` (chokepoints that many call paths pass through, which is where conflicts tend to happen). The path finder uses `shortestPath` and falls back to the closest shared caller when two functions aren't directly connected. People can add decisions and conventions there too, so it isn't only agents teaching agents.
+The dashboard shows the codebase as a map:
+
+- Functions are grouped by file.
+- Each developer's work is outlined in their colour.
+- Conflict paths are drawn in red.
+- Memory is shown as badges on functions.
+
+It uses FalkorDB's algorithms in a few places:
+
+- `algo.pageRank` ranks functions that much of the code depends on.
+- `algo.betweenness` finds functions that many call paths pass through, which is where conflicts are more likely.
+- The path finder uses `shortestPath`. When two functions aren't directly connected, it shows their closest shared caller instead.
+
+People can also add decisions and conventions from the dashboard.
 
 ![The Hivemind live view](https://raw.githubusercontent.com/Quantapixel/hivemind/main/docs/live-view.png)
 
-## How it runs
+## Architecture and setup
 
 ![Hivemind architecture](https://raw.githubusercontent.com/Quantapixel/hivemind/main/docs/blog/images/architecture.png)
 
-Each agent talks to FalkorDB Cloud directly over Cypher, through both the hooks and the MCP server. The dashboard on Vercel reads the same graph behind an access code. Timestamps come from the database server's clock because five laptops will never agree on the time.
+Each agent connects to FalkorDB Cloud directly over Cypher, through both the hooks and the MCP server. The dashboard is hosted on Vercel, reads the same graph, and is protected by an access code. Timestamps come from the database server's clock, since laptop clocks can differ.
 
-Joining a team is `uv tool install git+https://github.com/Quantapixel/hivemind` followed by `hivemind join <dashboard-url>` inside the project. That asks for the team's access code, finds which agents you have installed, wires each one up in its own config format and indexes the code. `hivemind doctor` checks every piece when something's off. Source code never leaves your machine; the graph only holds function names, how they call each other, and what people did to them.
+To join a team, you install Hivemind with `uv tool install git+https://github.com/Quantapixel/hivemind` and run `hivemind join <dashboard-url>` inside the project. The command:
 
-## Testing it with real agents
+1. Asks for the team's access code
+2. Detects which agents are installed
+3. Configures each agent in its own format
+4. Indexes the code
 
-Scripted demos are easy to fake, so I ran three separate clones as three "machines" sharing one cloud graph. Kira, on Kiro, was asked to add token revocation, with no mention of Hivemind in the prompt. The hooks still recorded the task, `revoke_token` as added, `validate_token` as changed, the passing test run and Kiro's summary.
+`hivemind doctor` checks the setup and reports what to fix.
 
-Then Carl, on Claude Code, was asked to add token scopes in the same area. Partway through, his agent said: *"The revocation check from kira's recent change is untouched."* Nobody had told it to check. A different person's work, done in a different agent, was simply part of its context. Cody, on Codex, then read the shared task board through MCP and saw both of them.
+Source code is not uploaded. The graph stores function names, how functions call each other, and what people did to them.
 
-## What I got wrong, and what I learned
+## Testing with real agents
 
-**Trusting agents to keep records.** Covered above, but it's the lesson I'd pass on to anyone building agent memory: if the memory depends on the agent remembering to write to it, it will be empty. Capture has to happen around the agent, not through it.
+I tested Hivemind with three separate clones of a project, acting as three machines that shared one cloud graph.
 
-**An undirected conflict query.** My first conflict check followed `CALLS` edges in both directions in one pattern. It flagged two functions as conflicting because some third function called both of them. Splitting it into "code I call" and "code that calls me" removed the false positives and made the explanations clearer. A graph query can read perfectly sensibly and still answer a slightly different question than the one you meant.
+First, Kira (using Kiro) was asked to add token revocation. The prompt didn't mention Hivemind. The hooks recorded the task, `revoke_token` as added, `validate_token` as changed, the passing test run, and Kiro's summary.
 
-**Deleting what one laptop couldn't see.** Developers' working copies differ. A function missing from my checkout may exist on your branch. Early on, re-indexing my copy could delete that function along with every memory attached to it. Now a function is only removed when no memory hangs off it.
+Next, Carl (using Claude Code) was asked to add token scopes in the same area. During the task, his agent noted: *"The revocation check from kira's recent change is untouched."* It had picked up Kira's change from the shared memory without being asked to check.
 
-**Relying on documentation for payload formats.** The first real Kiro session and the first real Claude Code session each broke something my hand-written fixtures hadn't covered. Every hook test now runs on payloads captured from real sessions, against a real FalkorDB rather than a mock.
+Finally, Cody (using Codex) read the shared task board through MCP and saw both of their tasks.
 
-**Deploying the dashboard far from the database.** Every refresh made a round trip across the world. Pinning the Vercel region next to the database fixed it, and it's now a line in the setup docs.
+## What I learned
 
-On the positive side, the data model kept the codebase small. Conflicts, context, consolidation, handoffs, blast radius, who-knows and why are each one or two Cypher queries. When the shape of the data matches the shape of the questions, there's not much code left to write.
+**Agents don't reliably record things themselves.** Relying on agents to call a recording tool left the memory mostly empty. Recording through hooks, outside the agent's decisions, worked much better.
 
-## What's next
+**The first conflict query was too broad.** It followed `CALLS` edges in both directions in one pattern, so two functions were flagged as conflicting just because a third function called both. Splitting it into "code I call" and "code that calls me" removed these false positives and made the explanations clearer.
 
-Only Python is indexed today, so Tree-sitter support for TypeScript, Go and Rust is first. After that: merging similar failures by meaning using FalkorDB's vector index (it uses word overlap now), linking decisions to PRs automatically, suggesting reviewers with community detection on the call graph, and letting old attempts and stale claims fade out.
+**Re-indexing could delete memory.** Developers' working copies differ, so a function missing from one copy may still exist on another branch. Early on, re-indexing one copy could delete that function and the memory attached to it. Now a function is only removed if no memory is attached to it.
+
+**Documentation didn't cover all hook payloads.** The first real Kiro and Claude Code sessions each found cases my hand-written test fixtures had missed. The hook tests now use payloads captured from real sessions, and all tests run against a real FalkorDB instance.
+
+**Region placement matters.** The dashboard was first deployed in a region far from the database, which made every request slow. Deploying it in the same region as the database fixed this.
+
+Overall, the graph model kept the code small. Conflict detection, context, consolidation, handoffs, blast radius, `who_knows` and `why` are each one or two Cypher queries.
+
+## Next steps
+
+- Support for TypeScript, Go and Rust using Tree-sitter (only Python is indexed now)
+- Merging similar failures by meaning using FalkorDB's vector index (currently it uses word overlap)
+- Linking decisions to pull requests automatically
+- Suggesting reviewers using community detection on the call graph
+- Expiring old attempts and stale claims
 
 ## Try it
 
-The [live demo](https://hivemind-live-demo.vercel.app) plays the whole story in a few minutes. There's also a [3-minute video](https://github.com/Quantapixel/hivemind/blob/main/docs/videos/hivemind-demo.mp4) with real agents in real terminals. To run everything locally with no accounts:
+The [live demo](https://hivemind-live-demo.vercel.app) plays through the full scenario step by step. There is also a [3-minute video](https://github.com/Quantapixel/hivemind/blob/main/docs/videos/hivemind-demo.mp4) using real agents.
+
+To run it locally without any accounts:
 
 ```bash
 git clone https://github.com/Quantapixel/hivemind && cd hivemind && uv sync
@@ -227,7 +297,7 @@ uv run hivemind ui &          # http://127.0.0.1:8765
 uv run hivemind demo --step   # press Enter to advance
 ```
 
-If your team runs several agents on one codebase, I'd like to hear how you handle this today, especially if you've found something simpler.
+If your team uses several agents on one codebase, I'd be interested to hear how you coordinate them.
 
 ---
 

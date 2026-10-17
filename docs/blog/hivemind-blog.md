@@ -182,7 +182,7 @@ RETURN caller.qname, min(length(p)) AS distance
 
 The dashboard draws the codebase as a map: functions grouped by file, each developer's work outlined in their colour, conflict paths in red, memory as badges. Hotspots come from `algo.pageRank` (functions everything depends on) and `algo.betweenness` (chokepoints that many call paths pass through, which is where conflicts tend to happen). The path finder uses `shortestPath` and falls back to the closest shared caller when two functions aren't directly connected. People can add decisions and conventions there too, so it isn't only agents teaching agents.
 
-![The Hivemind live view](https://raw.githubusercontent.com/Quantapixel/hivemind/main/docs/images/live-view.png)
+![The Hivemind live view](https://raw.githubusercontent.com/Quantapixel/hivemind/main/docs/live-view.png)
 
 ## How it runs
 

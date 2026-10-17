@@ -1,6 +1,6 @@
 """Scripted three-developer scenario on the demo shop app.
 
-Run `memofull ui` in one terminal and `memofull demo` in another, then
+Run `hivemind ui` in one terminal and `hivemind demo` in another, then
 watch the graph while three agents on three machines coordinate through it.
 """
 

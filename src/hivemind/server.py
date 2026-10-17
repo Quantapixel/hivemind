@@ -1,6 +1,6 @@
 """MCP server: exposes the team brain as tools to any coding agent
 (Claude Code, Codex, Kiro, ...). Each developer's agent launches it over
-stdio; it finds the project's .memofull/config.json and the team's shared
+stdio; it finds the project's .hivemind/config.json and the team's shared
 FalkorDB from there."""
 
 from __future__ import annotations
@@ -12,7 +12,7 @@ from .db import Settings, connect
 from .project import default_dev, find_root, load_settings, read_session
 
 INSTRUCTIONS = """\
-Memofull is the shared memory of every coding agent on this team. Other
+Hivemind is the shared memory of every coding agent on this team. Other
 developers' agents are editing the same codebase right now, and they read
 what you write here. Edits and test runs are captured automatically by
 hooks; the tools below are for what hooks cannot see. Follow this protocol:
@@ -36,7 +36,7 @@ file paths ("shop/auth.py") or full ids ("shop/auth.py::login").
 
 
 def create_server(brain: Brain) -> MCPServer:
-    mcp = MCPServer("memofull", instructions=INSTRUCTIONS)
+    mcp = MCPServer("hivemind", instructions=INSTRUCTIONS)
 
     @mcp.tool()
     def start_task(intent: str, targets: list[str]) -> dict:

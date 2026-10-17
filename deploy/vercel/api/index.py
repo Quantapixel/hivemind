@@ -1,9 +1,9 @@
-"""Vercel entry point for the hosted Memofull dashboard.
+"""Vercel entry point for the hosted Hivemind dashboard.
 
 Environment (set in the Vercel project):
   FALKORDB_URL             redis[s]://user:password@host:port of the team database
-  MEMOFULL_DASHBOARD_KEY   access code teammates type to open the dashboard
-  MEMOFULL_TEAMS           optional, comma-separated teams to show
+  HIVEMIND_DASHBOARD_KEY   access code teammates type to open the dashboard
+  HIVEMIND_TEAMS           optional, comma-separated teams to show
 """
 
 import os
@@ -13,9 +13,9 @@ from urllib.parse import parse_qsl, urlencode
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 
 # The simulation replays a story on the bundled example project.
-os.environ.setdefault("MEMOFULL_SIM_PROJECT", os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "shopapp"))
+os.environ.setdefault("HIVEMIND_SIM_PROJECT", os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "shopapp"))
 
-from memofull.ui import app_from_env  # noqa: E402
+from hivemind.ui import app_from_env  # noqa: E402
 
 
 def original_paths(app):

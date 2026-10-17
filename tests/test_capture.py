@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from memofull.capture import is_test_command, normalize, parse_failure
+from hivemind.capture import is_test_command, normalize, parse_failure
 
 FIX = Path(__file__).parent / "fixtures" / "hooks"
 
@@ -82,5 +82,5 @@ def test_parse_failure_unittest_and_pytest():
     ("set -o pipefail; pytest | tail", 1, "", False),
 ])
 def test_outcome_handles_pipes(cmd, code, out, expected):
-    from memofull.capture import test_outcome
+    from hivemind.capture import test_outcome
     assert test_outcome(cmd, code, out) is expected

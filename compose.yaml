@@ -1,4 +1,4 @@
-# One FalkorDB instance holds a separate graph per team (memofull_<team>).
+# One FalkorDB instance holds a separate graph per team (hivemind_<team>).
 # Works with `docker compose up -d` or `podman compose up -d`.
 services:
   falkordb:

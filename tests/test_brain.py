@@ -7,9 +7,9 @@ from pathlib import Path
 
 import pytest
 
-from memofull.brain import Brain
-from memofull.db import Settings, connect
-from memofull.indexer import index_repo, parse_repo, resolve
+from hivemind.brain import Brain
+from hivemind.db import Settings, connect
+from hivemind.indexer import index_repo, parse_repo, resolve
 
 SHOPAPP = Path(__file__).resolve().parents[1] / "examples" / "shopapp"
 
@@ -114,8 +114,8 @@ def test_reindex_removes_deleted_functions(graph, tmp_path):
 
 
 def test_hook_resolves_edit_to_functions_and_warns_once(graph):
-    from memofull.capture import Edit, HookEvent
-    from memofull.hooks import on_pre_edit
+    from hivemind.capture import Edit, HookEvent
+    from hivemind.hooks import on_pre_edit
 
     Brain(graph, "alice").start_task("jwt", ["validate_token"])
     bob = Brain(graph, "bob", "claude")

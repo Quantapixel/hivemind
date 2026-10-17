@@ -8,9 +8,9 @@ from pathlib import Path
 
 import pytest
 
-from memofull.brain import Brain, similarity
-from memofull.db import Settings, connect
-from memofull.indexer import index_file, index_repo
+from hivemind.brain import Brain, similarity
+from hivemind.db import Settings, connect
+from hivemind.indexer import index_file, index_repo
 
 SHOPAPP = Path(__file__).resolve().parents[1] / "examples" / "shopapp"
 
@@ -177,7 +177,7 @@ def test_timestamps_come_from_the_database_clock(repo, monkeypatch):
 
     g, _ = repo
     real = _time.time
-    monkeypatch.setattr("memofull.brain.time.time", lambda: real() + 5.5 * 3600)  # a laptop 5.5h fast
+    monkeypatch.setattr("hivemind.brain.time.time", lambda: real() + 5.5 * 3600)  # a laptop 5.5h fast
     b = Brain(g, "alice")
     b.attach_session("s-clock")
     b.note_prompt("anything")

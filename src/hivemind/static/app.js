@@ -1,4 +1,4 @@
-/* Memofull live view. Plain JS, no build step. */
+/* Hivemind live view. Plain JS, no build step. */
 (() => {
 "use strict";
 
@@ -52,8 +52,8 @@ const ago = (ts) => {
   return `${Math.round(s / 86400)}d ago`;
 };
 const store = {
-  get(k, d) { try { const v = localStorage.getItem("memofull." + k); return v === null ? d : JSON.parse(v); } catch { return d; } },
-  set(k, v) { try { localStorage.setItem("memofull." + k, JSON.stringify(v)); } catch { /* private mode */ } },
+  get(k, d) { try { const v = localStorage.getItem("hivemind." + k); return v === null ? d : JSON.parse(v); } catch { return d; } },
+  set(k, v) { try { localStorage.setItem("hivemind." + k, JSON.stringify(v)); } catch { /* private mode */ } },
 };
 const DEV_COLORS = ["#6e9eff", "#ff9f5a", "#b88cff", "#3ccfb4", "#ff7ab6", "#f5cb5c", "#59c2ff", "#a3d977"];
 const FILE_COLORS = ["#7c8cf8", "#5fb3a1", "#d4a35a", "#c77dba", "#6fa8dc", "#e07a5f", "#8fb86a", "#b39ddb", "#4db6ac", "#d98aa0"];
@@ -1038,7 +1038,7 @@ async function loadTeams() {
   if (!S.team) S.team = r.default;
   if (!r.teams.includes(S.team) && r.teams.length) S.team = r.teams.includes(r.default) ? r.default : r.teams[0];
   $("#teamMenu").innerHTML = r.teams.map((t) => `<button data-team="${esc(t)}" class="${t === S.team ? "on" : ""}"><span>${esc(t)}</span>${t === S.team ? '<i data-icon="check"></i>' : ""}</button>`).join("")
-    || `<div class="empty" style="padding:8px 10px">No team graphs yet. Run memofull index.</div>`;
+    || `<div class="empty" style="padding:8px 10px">No team graphs yet. Run hivemind index.</div>`;
   paintIcons($("#teamMenu"));
   $("#teamName").textContent = S.team;
 }

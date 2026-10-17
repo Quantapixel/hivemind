@@ -1,7 +1,7 @@
 """Live view of a team graph: code, who is working where, conflicts and memory.
 
 Every endpoint takes ?team=<name> so one server can show any team graph in
-the FalkorDB instance. Runs locally (`memofull ui`) or as a hosted
+the FalkorDB instance. Runs locally (`hivemind ui`) or as a hosted
 dashboard (deploy/vercel); hosted, every API call needs the team's access
 code and only the allowed teams are visible.
 """
@@ -370,7 +370,7 @@ def create_app(
         return JSONResponse(memory(teams, team_of(request)))
 
     async def api_join(_: Request) -> JSONResponse:
-        """`memofull join` exchanges the team access code for the database
+        """`hivemind join` exchanges the team access code for the database
         connection, so teammates never copy the database password around."""
         if not (allow_join and access_key):
             return JSONResponse({"error": "joining is not enabled on this dashboard"}, status_code=404)
@@ -473,25 +473,25 @@ def create_app(
 
 
 def app_from_env() -> Starlette:
-    """The hosted dashboard. Configure with FALKORDB_URL, MEMOFULL_DASHBOARD_KEY
-    (required) and optionally MEMOFULL_TEAMS (comma-separated)."""
-    key = os.environ.get("MEMOFULL_DASHBOARD_KEY", "")
-    public = os.environ.get("MEMOFULL_PUBLIC") == "1"
-    allowed = [t.strip() for t in os.environ.get("MEMOFULL_TEAMS", "").split(",") if t.strip()] or None
+    """The hosted dashboard. Configure with FALKORDB_URL, HIVEMIND_DASHBOARD_KEY
+    (required) and optionally HIVEMIND_TEAMS (comma-separated)."""
+    key = os.environ.get("HIVEMIND_DASHBOARD_KEY", "")
+    public = os.environ.get("HIVEMIND_PUBLIC") == "1"
+    allowed = [t.strip() for t in os.environ.get("HIVEMIND_TEAMS", "").split(",") if t.strip()] or None
     if public:
         # A public demo: no access code, so it may only show named teams and
         # must never hand out the database connection.
         if not allowed:
-            raise RuntimeError("A public dashboard needs MEMOFULL_TEAMS (the teams it may show).")
+            raise RuntimeError("A public dashboard needs HIVEMIND_TEAMS (the teams it may show).")
         key = ""
     elif len(key) < 8:
-        raise RuntimeError("Set MEMOFULL_DASHBOARD_KEY (8+ characters) before hosting the dashboard.")
+        raise RuntimeError("Set HIVEMIND_DASHBOARD_KEY (8+ characters) before hosting the dashboard.")
     settings = Settings.from_env()
     if allowed:
         settings.team = allowed[0]
-    allow_join = not public and os.environ.get("MEMOFULL_ALLOW_JOIN", "1") != "0"
-    sim_team = os.environ.get("MEMOFULL_SIM_TEAM") or None
-    sim_project = Path(os.environ["MEMOFULL_SIM_PROJECT"]) if os.environ.get("MEMOFULL_SIM_PROJECT") else None
+    allow_join = not public and os.environ.get("HIVEMIND_ALLOW_JOIN", "1") != "0"
+    sim_team = os.environ.get("HIVEMIND_SIM_TEAM") or None
+    sim_project = Path(os.environ["HIVEMIND_SIM_PROJECT"]) if os.environ.get("HIVEMIND_SIM_PROJECT") else None
     return create_app(settings, access_key=key or None, allowed_teams=allowed, allow_join=allow_join,
                       sim_team=sim_team, sim_project=sim_project)
 
@@ -499,5 +499,5 @@ def app_from_env() -> Starlette:
 def run(settings: Settings, host: str = "127.0.0.1", port: int = 8765, access_key: str | None = None) -> None:
     import uvicorn
 
-    print(f"Memofull live view: http://{host}:{port}/?team={settings.team}")
+    print(f"Hivemind live view: http://{host}:{port}/?team={settings.team}")
     uvicorn.run(create_app(settings, access_key=access_key), host=host, port=port, log_level="warning")

@@ -10,11 +10,11 @@ from pathlib import Path
 
 import pytest
 
-from memofull.brain import Brain
-from memofull.capture import normalize
-from memofull.db import Settings, connect
-from memofull.hooks import handle
-from memofull.indexer import index_repo
+from hivemind.brain import Brain
+from hivemind.capture import normalize
+from hivemind.db import Settings, connect
+from hivemind.hooks import handle
+from hivemind.indexer import index_repo
 
 FIX = Path(__file__).parent / "fixtures" / "hooks"
 SHOPAPP = Path(__file__).resolve().parents[1] / "examples" / "shopapp"

@@ -1,4 +1,4 @@
-"""Hook entry point for Claude Code, Codex and Kiro: `hivemind hook --agent X`.
+"""Hook entry point for Claude Code, Codex and Kiro: `memofull hook --agent X`.
 
 Every agent action that matters becomes shared memory without the agent
 having to call a tool:
@@ -65,7 +65,7 @@ def team_brief(brain: Brain) -> str:
     )
     if not others and not failures:
         return ""
-    lines = ["Hivemind (shared memory for this repo):"]
+    lines = ["Memofull (shared memory for this repo):"]
     for t in others[:5]:
         where = ", ".join(c.split("::")[-1] for c in t["claimed"][:4])
         status = "handed off, waiting for someone" if t["status"] == "handed_off" else "working on"
@@ -73,7 +73,7 @@ def team_brief(brain: Brain) -> str:
     for f in failures:
         times = f" ×{f['n']}" if f["n"] > 1 else ""
         lines.append(f"- Unresolved failure on {', '.join(f['fns'])}{times}: {f['summary']} - {f['reason']}")
-    lines.append("Check `get_context` from the hivemind tools before changing that code.")
+    lines.append("Check `get_context` from the memofull tools before changing that code.")
     return "\n".join(lines)
 
 
@@ -102,7 +102,7 @@ def on_pre_edit(brain: Brain, ev: HookEvent, root: Path) -> str | None:
     if not fresh:
         return None
     brain.q("UNWIND $keys AS k MERGE (:Ack {key: k, dev: $dev})", keys=[_ack_key(c) for c in fresh], dev=brain.dev)
-    lines = ["Hivemind: a teammate is working on code connected to this edit."]
+    lines = ["Memofull: a teammate is working on code connected to this edit."]
     for c in fresh:
         path = " -> ".join(p.split("::")[-1] for p in c["path"])
         lines.append(f"- {c['other_dev']} is on \"{c['other_intent']}\" ({c['other_function']}).")
@@ -112,7 +112,7 @@ def on_pre_edit(brain: Brain, ev: HookEvent, root: Path) -> str | None:
             lines.append(f"- Past failed attempt by {a['dev']} on {a['function']}: {a['summary']} ({a['reason']}).")
     lines.append(
         "Tell the user about the overlap before continuing. If it is safe, retry the same edit "
-        "and it will go through; use the hivemind tools for full context."
+        "and it will go through; use the memofull tools for full context."
     )
     return "\n".join(lines)
 
@@ -173,7 +173,7 @@ def main(agent: str = "claude") -> None:
         ev = normalize(raw, agent)
         root = find_root(ev.cwd)
         if root is None:
-            sys.exit(0)  # not a Hivemind project
+            sys.exit(0)  # not a Memofull project
         settings = load_settings(root)
         brain = Brain(connect(settings), settings.dev, agent)
         if ev.session_id:
@@ -184,6 +184,6 @@ def main(agent: str = "claude") -> None:
         if err:
             print(err, file=sys.stderr)
     except Exception as exc:  # never break the user's agent over a hook
-        print(f"hivemind hook: {exc}", file=sys.stderr)
+        print(f"memofull hook: {exc}", file=sys.stderr)
         code = 0
     sys.exit(code)

@@ -1,4 +1,4 @@
-"""Getting people set up: `hivemind join` and `hivemind doctor`.
+"""Getting people set up: `memofull join` and `memofull doctor`.
 
 join    one command from a fresh install to a working setup: exchange the
         team's dashboard access code for the database connection, check it,
@@ -27,8 +27,8 @@ AGENT_BINARIES = {"claude": "claude", "kiro": "kiro-cli", "codex": "codex"}
 AGENT_NAMES = {"claude": "Claude Code", "kiro": "Kiro", "codex": "Codex"}
 START = {
     "claude": "claude",
-    "kiro": "kiro-cli chat --agent hivemind",
-    "codex": "codex   (approve the Hivemind hooks when asked; meanwhile run `hivemind watch .` in another terminal)",
+    "kiro": "kiro-cli chat --agent memofull",
+    "codex": "codex   (approve the Memofull hooks when asked; meanwhile run `memofull watch .` in another terminal)",
 }
 
 GREEN, RED, YELLOW, DIM, BOLD, RESET = "\033[32m", "\033[31m", "\033[33m", "\033[2m", "\033[1m", "\033[0m"
@@ -57,7 +57,7 @@ def git_name(path: Path) -> str:
 
 def fetch_join(dashboard: str, code: str) -> dict:
     url = dashboard.rstrip("/") + "/api/join"
-    req = urllib.request.Request(url, headers={"Authorization": f"Bearer {code}", "User-Agent": "hivemind-cli"})
+    req = urllib.request.Request(url, headers={"Authorization": f"Bearer {code}", "User-Agent": "memofull-cli"})
     try:
         with urllib.request.urlopen(req, timeout=20) as r:
             return json.loads(r.read())
@@ -84,7 +84,7 @@ def join(dashboard: str, code: str | None, path: Path, agents: list[str] | None,
     from .setup import init
 
     print(f"{BOLD}Joining via {dashboard}{RESET}")
-    code = code or os.environ.get("HIVEMIND_ACCESS_CODE") or getpass.getpass("  Team access code: ").strip()
+    code = code or os.environ.get("MEMOFULL_ACCESS_CODE") or getpass.getpass("  Team access code: ").strip()
     info = fetch_join(dashboard, code)
     settings = Settings(url=info["url"], team=info["team"])
     try:
@@ -122,12 +122,12 @@ def join(dashboard: str, code: str | None, path: Path, agents: list[str] | None,
     for a in agents:
         print(f"  {AGENT_NAMES[a]:<12} {START[a]}")
     print(f"\nDashboard: {dashboard.rstrip('/')}   (same access code)")
-    print(f"{DIM}Problems? Run `hivemind doctor`.{RESET}")
+    print(f"{DIM}Problems? Run `memofull doctor`.{RESET}")
 
 
 def doctor(path: Path) -> int:
     ok = True
-    print(f"{BOLD}Hivemind doctor{RESET}")
+    print(f"{BOLD}Memofull doctor{RESET}")
     print(f"  {DIM}python {sys.executable}{RESET}")
 
     cfg = load_user_config()
@@ -138,7 +138,7 @@ def doctor(path: Path) -> int:
         settings = Settings.from_env()
     where = settings.where()
     ok &= say(bool(cfg.get("url") or os.environ.get("FALKORDB_URL") or os.environ.get("FALKORDB_HOST") or root),
-              f"Database configured: {where}", "Run `hivemind join <dashboard-url>` (or `hivemind connect <url>`).")
+              f"Database configured: {where}", "Run `memofull join <dashboard-url>` (or `memofull connect <url>`).")
     try:
         t = time.time()
         g = connect(settings)
@@ -151,7 +151,7 @@ def doctor(path: Path) -> int:
         g = None
 
     if root is None:
-        ok &= say(False, f"{path} is not a Hivemind project", "cd into the project and run `hivemind join <dashboard-url>` there.")
+        ok &= say(False, f"{path} is not a Memofull project", "cd into the project and run `memofull join <dashboard-url>` there.")
         return 0 if ok else 1
     ok &= say(True, f"Project {root} (team '{json.loads((root / MARKER).read_text()).get('team')}')")
     name = default_dev(root)
@@ -163,14 +163,14 @@ def doctor(path: Path) -> int:
         if configured:
             ok &= say(installed, f"{AGENT_NAMES[agent]}: {detail}", f"{binary} is not installed on this machine.")
         elif installed:
-            say(None, f"{AGENT_NAMES[agent]} is installed but not connected", f"Run `hivemind init . --agent {agent}`.")
+            say(None, f"{AGENT_NAMES[agent]} is installed but not connected", f"Run `memofull init . --agent {agent}`.")
     if not any(_agent_configured(a, root)[0] for a in AGENT_BINARIES):
-        ok &= say(False, "No agent is connected in this project", "Run `hivemind join <dashboard-url>` or `hivemind init . --agent claude`.")
+        ok &= say(False, "No agent is connected in this project", "Run `memofull join <dashboard-url>` or `memofull init . --agent claude`.")
 
     hook_python = _hook_python(root)
     if hook_python:
         ok &= say(Path(hook_python).exists(), "Hook command points at an existing Python",
-                  "Hivemind was reinstalled or moved: run `hivemind init .` again.")
+                  "Memofull was reinstalled or moved: run `memofull init .` again.")
     if g is not None:
         last = g.query("MATCH (e:Event) WHERE e.dev = $d RETURN max(e.ts)", {"d": name}).result_set[0][0]
         say(None if last is None else True,
@@ -186,17 +186,17 @@ def _agent_configured(agent: str, root: Path) -> tuple[bool, str]:
     if agent == "claude":
         mcp = root / ".mcp.json"
         hooks = root / ".claude" / "settings.local.json"
-        has_mcp = mcp.exists() and "hivemind" in json.loads(mcp.read_text()).get("mcpServers", {})
-        has_hooks = hooks.exists() and "hivemind.cli hook" in hooks.read_text()
+        has_mcp = mcp.exists() and "memofull" in json.loads(mcp.read_text()).get("mcpServers", {})
+        has_hooks = hooks.exists() and "memofull.cli hook" in hooks.read_text()
         return has_mcp or has_hooks, "tools and hooks connected" if has_mcp and has_hooks else "partly connected (re-run init)"
     if agent == "kiro":
-        p = root / ".kiro" / "agents" / "hivemind.json"
-        return p.exists(), "agent 'hivemind' connected (kiro-cli chat --agent hivemind)"
+        p = root / ".kiro" / "agents" / "memofull.json"
+        return p.exists(), "agent 'memofull' connected (kiro-cli chat --agent memofull)"
     if agent == "codex":
         cfg = Path(os.environ.get("CODEX_HOME") or Path.home() / ".codex") / "config.toml"
         text = cfg.read_text() if cfg.exists() else ""
-        has = "[mcp_servers.hivemind]" in text
-        return has, "tools connected" + ("; hooks installed (approve them in Codex)" if "HIVEMIND MANAGED HOOKS" in text else "")
+        has = "[mcp_servers.memofull]" in text
+        return has, "tools connected" + ("; hooks installed (approve them in Codex)" if "MEMOFULL MANAGED HOOKS" in text else "")
     return False, ""
 
 
@@ -204,9 +204,9 @@ def _hook_python(root: Path) -> str | None:
     p = root / ".claude" / "settings.local.json"
     if p.exists():
         for line in p.read_text().split('"'):
-            if "hivemind.cli hook" in line:
+            if "memofull.cli hook" in line:
                 return line.split(" -m ")[0].strip().strip("'")
-    k = root / ".kiro" / "agents" / "hivemind.json"
+    k = root / ".kiro" / "agents" / "memofull.json"
     if k.exists():
-        return json.loads(k.read_text()).get("mcpServers", {}).get("hivemind", {}).get("command")
+        return json.loads(k.read_text()).get("mcpServers", {}).get("memofull", {}).get("command")
     return None

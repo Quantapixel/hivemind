@@ -4,19 +4,19 @@ The rules ask for "a demo video showing the working project". Judges will want t
 
 ## Before recording (5 minutes)
 
-1. Wake the database: open your instance in the FalkorDB Cloud console and check it says Running. Then run `hivemind doctor` in `~/shopapp` and make sure everything is ✓.
+1. Wake the database: open your instance in the FalkorDB Cloud console and check it says Running. Then run `memofull doctor` in `~/shopapp` and make sure everything is ✓.
 2. Open two terminals side by side, both in `~/shopapp`:
    - Terminal 1: you (Claude Code).
    - Terminal 2: a second developer. Use a second clone with a different name, e.g.
-     `git clone https://github.com/Quantapixel/shopapp ~/shopapp-maya && cd ~/shopapp-maya && git config user.name "Maya" && hivemind join https://hivemind-dashboard-five.vercel.app`
-     Use `kiro-cli chat --agent hivemind` here to show a second agent.
-3. Browser: the private dashboard (https://hivemind-dashboard-five.vercel.app) on team `duo`, and a second tab with the public demo.
+     `git clone https://github.com/Quantapixel/shopapp ~/shopapp-maya && cd ~/shopapp-maya && git config user.name "Maya" && memofull join https://memofull-dashboard.vercel.app`
+     Use `kiro-cli chat --agent memofull` here to show a second agent.
+3. Browser: the private dashboard (https://memofull-dashboard.vercel.app) on team `duo`, and a second tab with the public demo.
 4. Make sure the shop app's tests pass at the start: `python3 -m unittest discover -s tests -t .`
 
 ## Shots
 
 **0:00 – 0:20 · The problem** (talk over the dashboard)
-"Every developer now has their own coding agent. But my agent doesn't know what yours is doing, and it forgets everything between sessions. Hivemind gives all of them one shared memory, a graph in FalkorDB."
+"Every developer now has their own coding agent. But my agent doesn't know what yours is doing, and it forgets everything between sessions. Memofull gives all of them one shared memory, a graph in FalkorDB."
 
 **0:20 – 0:50 · Collision caught before it happens**
 - Terminal 2 (Maya, Kiro): *"Make validate_token reject tokens older than 30 minutes."* Let it start editing.
@@ -44,7 +44,7 @@ The rules ask for "a demo video showing the working project". Judges will want t
 - Say: "Every feature is a traversal: conflicts are a variable-length CALLS path to someone's claim, blast radius is transitive callers, and core functions come from PageRank. Remove FalkorDB and nothing works."
 
 **2:50 – 3:00 · Close**
-- Public demo tab: "Try it yourself at hivemind-live-demo.vercel.app. Five developers, three agents, one memory."
+- Public demo tab: "Try it yourself at memofull-live-demo.vercel.app. Five developers, three agents, one memory."
 
 ## If something goes wrong while recording
 

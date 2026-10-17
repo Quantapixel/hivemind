@@ -1,23 +1,23 @@
-# ⬡ Hivemind
+# ⬡ Memofull
 
 **A shared graph brain for every coding agent on a team.** Built on [FalkorDB](https://falkordb.com) for [Graph Hacks: Context for AI Agents](https://www.wemakedevs.org/hackathons/falkordb) (WeMakeDevs × FalkorDB, Oct 15–18 2026).
 
 | | |
 |---|---|
-| **▶ Live demo** | **[hivemind-live-demo.vercel.app](https://hivemind-live-demo.vercel.app)**: press Play, no sign-up |
-| **Demo videos** | [Hivemind demo (3:14)](docs/videos/hivemind-demo.mp4) · [Walkthrough of the live demo (2:49)](docs/videos/hivemind-demo-walkthrough.mp4) |
+| **▶ Live demo** | **[memofull-live-demo.vercel.app](https://memofull-live-demo.vercel.app)**: press Play, no sign-up |
+| **Demo videos** | [Memofull demo (3:14)](docs/videos/memofull-demo.mp4) · [Walkthrough of the live demo (2:49)](docs/videos/memofull-demo-walkthrough.mp4) |
 | **Track** | Agent Memory and Coordination (Track 02) |
 | **Built with** | FalkorDB Cloud · Python · MCP · Claude Code, Kiro and Codex hooks · Vercel |
 
 Five developers each run their own Claude Code, Codex or Kiro agent on the same repo. None of those agents knows what the others are doing. Agent A rewrites `validate_token()` while Agent B builds on its old behaviour. Agent C retries a fix that Agent D found breaks production yesterday. Every session starts from zero.
 
-Hivemind puts every agent on one graph. It holds the code's call graph, who is changing what, what has been tried, and what the team decided. **Agents don't have to remember to use it:** hooks in Claude Code, Kiro and Codex record every edit (down to the function) and every test run as they happen, and the memory consolidates itself as it grows. Agents get three things from it:
+Memofull puts every agent on one graph. It holds the code's call graph, who is changing what, what has been tried, and what the team decided. **Agents don't have to remember to use it:** hooks in Claude Code, Kiro and Codex record every edit (down to the function) and every test run as they happen, and the memory consolidates itself as it grows. Agents get three things from it:
 
-- **Warnings before conflicts happen.** Before an edit, the agent learns that a teammate is changing code it depends on, and it gets the exact call path: `checkout → current_user → validate_token`. Git only catches the textual conflict after both people are done. Hivemind catches the *semantic* one before anyone writes code.
+- **Warnings before conflicts happen.** Before an edit, the agent learns that a teammate is changing code it depends on, and it gets the exact call path: `checkout → current_user → validate_token`. Git only catches the textual conflict after both people are done. Memofull catches the *semantic* one before anyone writes code.
 - **Memory of what failed, captured automatically.** When an agent changes code and the tests fail, that failure is attached to the exact functions it changed. It reaches the next agent that touches that function *or anything that calls it*, on any machine, in any later session, whichever agent that developer uses. When a later change makes the tests pass, the failure is marked fixed, along with the fix.
 - **Clean handoffs.** Alice's agent stops mid-task, and Bob's agent resumes it the next morning with every session, attempt and note.
 
-**▶ [Live demo](https://hivemind-live-demo.vercel.app)**: press **Play** to watch five developers using Claude Code, Kiro and Codex work on one project through the shared memory: conflicts caught before anyone writes code, a failure that two attempts hit and that gets merged, a handoff, a fix that resolves the failure, and a decision that supersedes an older one. No sign-up needed.
+**▶ [Live demo](https://memofull-live-demo.vercel.app)**: press **Play** to watch five developers using Claude Code, Kiro and Codex work on one project through the shared memory: conflicts caught before anyone writes code, a failure that two attempts hit and that gets merged, a handoff, a fix that resolves the failure, and a decision that supersedes an older one. No sign-up needed.
 
 ![live view](docs/live-view.png)
 
@@ -25,17 +25,17 @@ Hivemind puts every agent on one graph. It holds the code's call graph, who is c
 
 ### Join a team (3 steps)
 
-Your teammate sends you a **dashboard link** and an **access code** (they run `hivemind invite` to get both). You'll also need the team's project on your machine (`git clone` it) and a coding agent: **Claude Code**, **Kiro CLI** or **Codex CLI**, logged in to your own account. Works on macOS and Linux; on Windows, use WSL.
+Your teammate sends you a **dashboard link** and an **access code** (they run `memofull invite` to get both). You'll also need the team's project on your machine (`git clone` it) and a coding agent: **Claude Code**, **Kiro CLI** or **Codex CLI**, logged in to your own account. Works on macOS and Linux; on Windows, use WSL.
 
 ```bash
 # 1. Install uv (skip if you have it), then open a new terminal
 curl -LsSf https://astral.sh/uv/install.sh | sh
 
-# 2. Install Hivemind
+# 2. Install Memofull
 uv tool install git+https://github.com/Quantapixel/memofull
 
 # 3. Inside your clone of the team's project
-hivemind join https://your-team-dashboard.vercel.app
+memofull join https://your-team-dashboard.vercel.app
 #    Team access code: ********
 ```
 
@@ -43,46 +43,46 @@ hivemind join https://your-team-dashboard.vercel.app
 
 | Agent | Start it with | Notes |
 |---|---|---|
-| Claude Code | `claude` | Approve the **hivemind** MCP server when asked |
-| Kiro | `kiro-cli chat --agent hivemind` | |
-| Codex | `codex` | Approve the Hivemind hooks when asked; until you do, keep `hivemind watch .` running in a second terminal |
+| Claude Code | `claude` | Approve the **memofull** MCP server when asked |
+| Kiro | `kiro-cli chat --agent memofull` | |
+| Codex | `codex` | Approve the Memofull hooks when asked; until you do, keep `memofull watch .` running in a second terminal |
 
 Open the dashboard link and enter the same access code to see the team live.
 
-**Something not working?** Run `hivemind doctor` in the project folder. It checks every piece and prints the fix for anything that's wrong.
+**Something not working?** Run `memofull doctor` in the project folder. It checks every piece and prints the fix for anything that's wrong.
 
 | Problem | Fix |
 |---|---|
 | `That access code was not accepted` | Ask your teammate for the current code |
 | `Could not reach` the database | A free FalkorDB Cloud instance sleeps after a day without use; whoever runs the team wakes it in the FalkorDB console |
-| You show up under the wrong name | `git config --global user.name "Your Name"`, then `hivemind join` again |
+| You show up under the wrong name | `git config --global user.name "Your Name"`, then `memofull join` again |
 | `not inside a git repository` | `cd` into your clone of the project first |
-| `hivemind: command not found` | Open a new terminal after installing, or run `uv tool update-shell` |
+| `memofull: command not found` | Open a new terminal after installing, or run `uv tool update-shell` |
 
 **What gets shared:** only work inside that project folder: your prompts, your agent's summaries, which functions changed and test results. Your code itself is never uploaded, only function names and how they call each other.
 
 ### Start a team (about 15 minutes, once)
 
-1. **A database everyone can reach.** Create a free instance on [FalkorDB Cloud](https://app.falkordb.cloud/signup): pick a region near your team and set a password made of letters and numbers. Free instances sleep after a day unused, are deleted after 7 days, and don't use TLS: fine for trying it out; use a paid tier or your own server for real work (Hivemind supports `rediss://` URLs).
+1. **A database everyone can reach.** Create a free instance on [FalkorDB Cloud](https://app.falkordb.cloud/signup): pick a region near your team and set a password made of letters and numbers. Free instances sleep after a day unused, are deleted after 7 days, and don't use TLS: fine for trying it out; use a paid tier or your own server for real work (Memofull supports `rediss://` URLs).
 2. **Install and connect:**
    ```bash
    uv tool install git+https://github.com/Quantapixel/memofull
-   hivemind --team myteam connect 'redis://falkordb:PASSWORD@HOST:PORT'
+   memofull --team myteam connect 'redis://falkordb:PASSWORD@HOST:PORT'
    ```
-   The URL is saved privately to `~/.config/hivemind/config.json`, never to the repo.
-3. **Connect your project:** `cd your-project && hivemind init .`
+   The URL is saved privately to `~/.config/memofull/config.json`, never to the repo.
+3. **Connect your project:** `cd your-project && memofull init .`
 4. **Host the dashboard on Vercel** (needs the [Vercel CLI](https://vercel.com/docs/cli), logged in). From a clone of this repo:
    ```bash
    FALKORDB_URL='redis://falkordb:PASSWORD@HOST:PORT' \
-   HIVEMIND_DASHBOARD_KEY="$(openssl rand -base64 12)" HIVEMIND_TEAMS=myteam \
+   MEMOFULL_DASHBOARD_KEY="$(openssl rand -base64 12)" MEMOFULL_TEAMS=myteam \
    scripts/deploy-dashboard.sh
    ```
-   Set `"regions"` in `deploy/vercel/vercel.json` next to your database (`bom1` for Mumbai, `iad1` for US East...), or every refresh crosses the world. If Vercel's own login wall blocks visitors, turn it off with `vercel project protection disable hivemind-dashboard --sso` (the dashboard has its own access code). The script saves the dashboard link and code privately so `invite` can print them.
-5. **Invite people:** `hivemind invite` prints the three steps above with your dashboard link and code. Send it privately, and give them access to the project repo.
+   Set `"regions"` in `deploy/vercel/vercel.json` next to your database (`bom1` for Mumbai, `iad1` for US East...), or every refresh crosses the world. If Vercel's own login wall blocks visitors, turn it off with `vercel project protection disable memofull-dashboard --sso` (the dashboard has its own access code). The script saves the dashboard link and code privately so `invite` can print them.
+5. **Invite people:** `memofull invite` prints the three steps above with your dashboard link and code. Send it privately, and give them access to the project repo.
 
 ## Why a graph
 
-Every question Hivemind answers is a question about connections:
+Every question Memofull answers is a question about connections:
 
 | Question | Graph work |
 |---|---|
@@ -97,7 +97,7 @@ In a relational store, each of these would mean stitching rows together with rec
 
 ## Graph data model
 
-One FalkorDB graph per team (`hivemind_<team>`, using FalkorDB's multi-graph support). The **code layer** is built from the repo; everything else is **team memory** attached to it.
+One FalkorDB graph per team (`memofull_<team>`, using FalkorDB's multi-graph support). The **code layer** is built from the repo; everything else is **team memory** attached to it.
 
 ```
 CODE LAYER (indexer.py, re-indexed per file as agents edit)
@@ -134,12 +134,12 @@ WHAT IS TRUE / HOW WE WORK (semantic, procedural)
 ```
  Developer A (anywhere)                Developer B (anywhere)
  Claude Code / Kiro / Codex            Claude Code / Kiro / Codex
-   ├─ hooks: hivemind hook               ├─ hooks
-   └─ MCP:   hivemind serve              └─ MCP
+   ├─ hooks: memofull hook               ├─ hooks
+   └─ MCP:   memofull serve              └─ MCP
           │   Cypher over redis(s)://          │
           ▼                                    ▼
    ┌──────────────── FalkorDB Cloud ────────────────┐
-   │  hivemind_<team>   hivemind_<other team>  ...  │
+   │  memofull_<team>   memofull_<other team>  ...  │
    └───────────────────────▲────────────────────────┘
                            │
         Vercel: dashboard (access code) · public demo (simulation)
@@ -213,7 +213,7 @@ RETURN [n IN nodes(shortestPath((x)-[:CALLS*]->(y))) | n.qname]                 
 
 Every agent action that matters becomes team memory, without the agent calling a tool:
 
-| The agent… | Hivemind records |
+| The agent… | Memofull records |
 |---|---|
 | receives a prompt | a task for the session, named after what the user asked |
 | is about to edit | which functions are changing; if a teammate is on connected code, the edit is **blocked once** with the call path and any failures on the other side |
@@ -223,7 +223,7 @@ Every agent action that matters becomes team memory, without the agent calling a
 
 ### It consolidates instead of piling up
 
-| When… | Hivemind… |
+| When… | Memofull… |
 |---|---|
 | the same failure happens again (same failing tests, or similar wording on the same code) | merges it: *"seen 3× by alice, bob"* |
 | an agent explains a failure its hooks just captured | puts the explanation on the captured attempt instead of creating a second one |
@@ -234,20 +234,20 @@ Every agent action that matters becomes team memory, without the agent calling a
 
 ## How agents connect
 
-`hivemind init <repo> --agent claude,codex,kiro` wires up each agent in its own format:
+`memofull init <repo> --agent claude,codex,kiro` wires up each agent in its own format:
 
 | | Claude Code | Kiro CLI | Codex CLI |
 |---|---|---|---|
-| Installs | `.mcp.json`, hooks in `.claude/settings.local.json`, `CLAUDE.md` | `.kiro/agents/hivemind.json` (MCP + hooks), `AGENTS.md` | `codex mcp add` (tools pre-approved), hooks block in `~/.codex/config.toml`, `AGENTS.md` |
+| Installs | `.mcp.json`, hooks in `.claude/settings.local.json`, `CLAUDE.md` | `.kiro/agents/memofull.json` (MCP + hooks), `AGENTS.md` | `codex mcp add` (tools pre-approved), hooks block in `~/.codex/config.toml`, `AGENTS.md` |
 | MCP tools | ✅ verified in real sessions | ✅ verified in real sessions | ✅ verified in real sessions |
-| Automatic capture | ✅ verified in real sessions | ✅ verified in real sessions | ⚠️ installed, but Codex only runs hooks after you trust them; not yet verified. Use `hivemind watch` (verified with a real Codex session) |
+| Automatic capture | ✅ verified in real sessions | ✅ verified in real sessions | ⚠️ installed, but Codex only runs hooks after you trust them; not yet verified. Use `memofull watch` (verified with a real Codex session) |
 | Block a conflicting edit | ✅ verified in a real session | ✅ via exit code 2 (tested with real payloads) | after the hooks are trusted |
 
-`hivemind watch` works with **any** tool, hooks or not. It notices file changes, records exactly which functions changed, claims them for you, and warns about conflicts (including a desktop notification).
+`memofull watch` works with **any** tool, hooks or not. It notices file changes, records exactly which functions changed, claims them for you, and warns about conflicts (including a desktop notification).
 
-Hooks find the project through `.hivemind/config.json`, so the Codex hooks (which are global) do nothing in other repos. Your name comes from `HIVEMIND_DEV`, or else your git `user.name`.
+Hooks find the project through `.memofull/config.json`, so the Codex hooks (which are global) do nothing in other repos. Your name comes from `MEMOFULL_DEV`, or else your git `user.name`.
 
-**MCP tools.** `hivemind serve` exposes 14 tools for what hooks can't see:
+**MCP tools.** `memofull serve` exposes 14 tools for what hooks can't see:
 
 | Coordinate | Remember | Explain |
 |---|---|---|
@@ -256,7 +256,7 @@ Hooks find the project through `.hivemind/config.json`, so the Codex hooks (whic
 A conflicting edit is blocked like this:
 
 ```
-Hivemind: a teammate is working on code connected to this edit.
+Memofull: a teammate is working on code connected to this edit.
 - alice is on "Add JWT support to auth tokens" (shop/tokens.py::validate_token).
   Path: checkout -> current_user -> validate_token. Your code calls code they are changing.
 - Past failed attempt by alice on shop/tokens.py::validate_token:
@@ -269,13 +269,13 @@ The agent tells the user, and a retry goes through. It's a warning, not a lock.
 
 Three "machines" (separate clones) shared one FalkorDB:
 
-1. **Kira (Kiro)** was asked to add token revocation; the prompt didn't mention Hivemind. Hooks recorded the task from her prompt, `revoke_token` **added** and `validate_token` **changed** (from AST diffs), the passing test run, and Kiro's summary as the progress note.
+1. **Kira (Kiro)** was asked to add token revocation; the prompt didn't mention Memofull. Hooks recorded the task from her prompt, `revoke_token` **added** and `validate_token` **changed** (from AST diffs), the passing test run, and Kiro's summary as the progress note.
 2. **Carl (Claude Code)** was asked to add token scopes. His agent said, unprompted: *"The revocation check from kira's recent change is untouched."* It knew about work done by a different developer using a different agent.
-3. **Cody (Codex)** read the shared task board through the MCP tools and saw Kira's and his own work. `hivemind watch` captured his edits.
+3. **Cody (Codex)** read the shared task board through the MCP tools and saw Kira's and his own work. `memofull watch` captured his edits.
 
 ## Live view
 
-`hivemind ui` draws the codebase as an architecture map: functions are labelled pills grouped into per-file regions, tasks are pinned to the code they claim, and memory shows as badges. People can add to the memory from here too.
+`memofull ui` draws the codebase as an architecture map: functions are labelled pills grouped into per-file regions, tasks are pinned to the code they claim, and memory shows as badges. People can add to the memory from here too.
 
 | | |
 |---|---|
@@ -293,26 +293,26 @@ Toggle layers (calls, work, memory, tests) and colour by file or by risk. Keyboa
 
 | Command | What it does |
 |---|---|
-| `hivemind join <dashboard-url>` | Join a team: asks for the access code, connects, wires up every agent you have installed, indexes the project |
-| `hivemind doctor` | Checks the database, the project, your name, each agent and the hooks; says what to fix |
-| `hivemind invite` | Prints the three steps to send a teammate |
-| `hivemind connect <url>` | Save a database URL privately (`~/.config/hivemind`), for whoever runs the team |
-| `hivemind init [path] [--agent claude,kiro,codex]` | Wire a repo's agents (default: all installed) and index it |
-| `hivemind watch [path]` | Record edits made by any tool, warn about conflicts |
-| `hivemind index [path] [--reset]` | Index or re-index a Python repo |
-| `hivemind ui` | Local live view (the hosted one is on Vercel) |
-| `hivemind demo [--step]` | Scripted three-developer scenario (wipes that team's graph) |
-| `hivemind serve`, `hivemind hook` | MCP server and hook entry point; `init` installs both, you never run them by hand |
-| `hivemind status` | Open tasks as JSON |
+| `memofull join <dashboard-url>` | Join a team: asks for the access code, connects, wires up every agent you have installed, indexes the project |
+| `memofull doctor` | Checks the database, the project, your name, each agent and the hooks; says what to fix |
+| `memofull invite` | Prints the three steps to send a teammate |
+| `memofull connect <url>` | Save a database URL privately (`~/.config/memofull`), for whoever runs the team |
+| `memofull init [path] [--agent claude,kiro,codex]` | Wire a repo's agents (default: all installed) and index it |
+| `memofull watch [path]` | Record edits made by any tool, warn about conflicts |
+| `memofull index [path] [--reset]` | Index or re-index a Python repo |
+| `memofull ui` | Local live view (the hosted one is on Vercel) |
+| `memofull demo [--step]` | Scripted three-developer scenario (wipes that team's graph) |
+| `memofull serve`, `memofull hook` | MCP server and hook entry point; `init` installs both, you never run them by hand |
+| `memofull status` | Open tasks as JSON |
 
 ## Host a public demo
 
-The live demo is the same dashboard in public mode: no access code, limited to the teams you name, and it never hands out the database connection. It plays the scripted story from `src/hivemind/simulation.py` one step per click, with each step writing to its own `simulation` team graph through the same calls that agents' hooks make.
+The live demo is the same dashboard in public mode: no access code, limited to the teams you name, and it never hands out the database connection. It plays the scripted story from `src/memofull/simulation.py` one step per click, with each step writing to its own `simulation` team graph through the same calls that agents' hooks make.
 
 ```bash
-FALKORDB_URL='redis://...' HIVEMIND_PUBLIC=1 HIVEMIND_TEAMS=simulation HIVEMIND_SIM_TEAM=simulation \
-VERCEL_PROJECT=hivemind-live-demo scripts/deploy-dashboard.sh
-vercel project protection disable hivemind-live-demo --sso   # if Vercel asks visitors to log in
+FALKORDB_URL='redis://...' MEMOFULL_PUBLIC=1 MEMOFULL_TEAMS=simulation MEMOFULL_SIM_TEAM=simulation \
+VERCEL_PROJECT=memofull-live-demo scripts/deploy-dashboard.sh
+vercel project protection disable memofull-live-demo --sso   # if Vercel asks visitors to log in
 ```
 
 ## Try the demo locally
@@ -322,13 +322,13 @@ No accounts needed: a local FalkorDB, the live view, and a scripted story with t
 ```bash
 git clone https://github.com/Quantapixel/memofull && cd memofull && uv sync
 docker compose up -d                # or: podman run -d -p 6379:6379 docker.io/falkordb/falkordb
-uv run hivemind ui &                # http://127.0.0.1:8765 (⌘K to search)
-uv run hivemind demo --step         # press Enter to advance
+uv run memofull ui &                # http://127.0.0.1:8765 (⌘K to search)
+uv run memofull demo --step         # press Enter to advance
 ```
 
 ## The local demo scenario
 
-`hivemind demo` plays this out on [`examples/shopapp`](examples/shopapp):
+`memofull demo` plays this out on [`examples/shopapp`](examples/shopapp):
 
 1. Team memory from last week: a convention, plus a decision on `tokens.py` ("stay HMAC until mobile v3", PR #42).
 2. **Alice's** agent starts *Add JWT support*. It is warned of the decision before it touches anything.
@@ -348,7 +348,7 @@ Layout: `indexer.py` (code → graph, AST hashes, incremental) · `brain.py` (me
 
 ## How this was built (AI disclosure)
 
-As the hackathon rules require: Hivemind was built during the hackathon window (first commit on Oct 16, 2026) with **Claude Code** (Anthropic) as an AI coding assistant. Jaskaran Singh came up with the idea (agents on different machines sharing one memory of a codebase) and set the product direction: automatic capture across Claude Code, Kiro and Codex, a cloud-hosted setup with a Vercel dashboard, one-command onboarding and the public simulation. He also reviewed the results at each step. Much of the code was written by the assistant under that direction. It was verified with automated tests against a real FalkorDB (63 tests) and with real Claude Code, Kiro and Codex sessions (see *Tested with real agents*). All example data is synthetic: [`examples/shopapp`](examples/shopapp) is a made-up shop backend.
+As the hackathon rules require: Memofull was built during the hackathon window (first commit on Oct 16, 2026) with **Claude Code** (Anthropic) as an AI coding assistant. Jaskaran Singh came up with the idea (agents on different machines sharing one memory of a codebase) and set the product direction: automatic capture across Claude Code, Kiro and Codex, a cloud-hosted setup with a Vercel dashboard, one-command onboarding and the public simulation. He also reviewed the results at each step. Much of the code was written by the assistant under that direction. It was verified with automated tests against a real FalkorDB (63 tests) and with real Claude Code, Kiro and Codex sessions (see *Tested with real agents*). All example data is synthetic: [`examples/shopapp`](examples/shopapp) is a made-up shop backend.
 
 ## Roadmap
 

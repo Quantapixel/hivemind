@@ -1,8 +1,8 @@
-"""FalkorDB connection and schema. One graph per team: hivemind_<team>.
+"""FalkorDB connection and schema. One graph per team: memofull_<team>.
 
 Where to connect comes from, in order: environment variables
 (FALKORDB_URL, or FALKORDB_HOST/PORT/PASSWORD), then the private per-user
-file written by `hivemind connect` (~/.config/hivemind/config.json), then
+file written by `memofull connect` (~/.config/memofull/config.json), then
 localhost. Credentials never go into the repo.
 """
 
@@ -33,7 +33,7 @@ INDEXES = [
 
 def user_config_path() -> Path:
     base = os.environ.get("XDG_CONFIG_HOME") or str(Path.home() / ".config")
-    return Path(base) / "hivemind" / "config.json"
+    return Path(base) / "memofull" / "config.json"
 
 
 def load_user_config() -> dict:
@@ -69,8 +69,8 @@ class Settings:
             host=os.environ.get("FALKORDB_HOST", "localhost"),
             port=int(os.environ.get("FALKORDB_PORT", "6379")),
             password=os.environ.get("FALKORDB_PASSWORD") or None,
-            team=os.environ.get("HIVEMIND_TEAM") or user.get("team") or "demo",
-            dev=os.environ.get("HIVEMIND_DEV", os.environ.get("USER", "anonymous")),
+            team=os.environ.get("MEMOFULL_TEAM") or user.get("team") or "demo",
+            dev=os.environ.get("MEMOFULL_DEV", os.environ.get("USER", "anonymous")),
             url=os.environ.get("FALKORDB_URL") or (None if os.environ.get("FALKORDB_HOST") else user.get("url")),
             username=os.environ.get("FALKORDB_USERNAME") or None,
         )
@@ -84,7 +84,7 @@ class Settings:
 
 
 def graph_name(team: str) -> str:
-    return f"hivemind_{team}"
+    return f"memofull_{team}"
 
 
 def open_db(settings: Settings) -> FalkorDB:

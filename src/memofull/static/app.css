@@ -1,4 +1,4 @@
-/* Hivemind live view. Tokens first; everything else reads from them. */
+/* Memofull live view. Tokens first; everything else reads from them. */
 :root,
 :root[data-theme="dark"] {
   --bg: #09090b;

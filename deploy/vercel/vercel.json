@@ -5,7 +5,7 @@
   ],
   "functions": {
     "api/index.py": {
-      "includeFiles": "{hivemind,shopapp}/**",
+      "includeFiles": "{memofull,shopapp}/**",
       "maxDuration": 30
     }
   },

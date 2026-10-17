@@ -1,4 +1,4 @@
-"""`hivemind watch`: capture edits from any tool, hooks or not.
+"""`memofull watch`: capture edits from any tool, hooks or not.
 
 Polls the project's Python files; when one changes it is re-indexed, the
 changed functions are recorded and claimed for this developer, and any
@@ -39,7 +39,7 @@ def _snapshot(root: Path) -> dict[str, float]:
 
 def _notify(title: str, body: str) -> None:
     if shutil.which("notify-send"):
-        subprocess.run(["notify-send", "-a", "Hivemind", title, body], capture_output=True)
+        subprocess.run(["notify-send", "-a", "Memofull", title, body], capture_output=True)
 
 
 def run(root: Path, settings: Settings, agent: str = "watch", interval: float = 1.0) -> None:
@@ -63,4 +63,4 @@ def run(root: Path, settings: Settings, agent: str = "watch", interval: float = 
                 path = " -> ".join(p.split("::")[-1] for p in c["path"])
                 msg = f"{c['other_dev']} is on \"{c['other_intent']}\": {path}"
                 print(f"  {RED}conflict{RESET} {msg}", flush=True)
-                _notify("Hivemind: connected work", msg)
+                _notify("Memofull: connected work", msg)

@@ -1,1 +1,1 @@
-"""A tiny shop backend used to demo Hivemind."""
+"""A tiny shop backend used to demo Memofull."""

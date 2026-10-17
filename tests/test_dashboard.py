@@ -7,8 +7,8 @@ import uuid
 import pytest
 from starlette.testclient import TestClient
 
-from hivemind.db import Settings, connect
-from hivemind.ui import create_app
+from memofull.db import Settings, connect
+from memofull.ui import create_app
 
 
 @pytest.fixture()
@@ -60,13 +60,13 @@ def test_join_is_off_for_local_dashboards(team):
 def test_public_simulation_dashboard(team, monkeypatch):
     from pathlib import Path
 
-    from hivemind.ui import app_from_env
+    from memofull.ui import app_from_env
 
-    monkeypatch.setenv("HIVEMIND_PUBLIC", "1")
-    monkeypatch.setenv("HIVEMIND_TEAMS", team)
-    monkeypatch.setenv("HIVEMIND_SIM_TEAM", team)
-    monkeypatch.setenv("HIVEMIND_SIM_PROJECT", str(Path(__file__).resolve().parents[1] / "examples" / "shopapp"))
-    monkeypatch.delenv("HIVEMIND_DASHBOARD_KEY", raising=False)
+    monkeypatch.setenv("MEMOFULL_PUBLIC", "1")
+    monkeypatch.setenv("MEMOFULL_TEAMS", team)
+    monkeypatch.setenv("MEMOFULL_SIM_TEAM", team)
+    monkeypatch.setenv("MEMOFULL_SIM_PROJECT", str(Path(__file__).resolve().parents[1] / "examples" / "shopapp"))
+    monkeypatch.delenv("MEMOFULL_DASHBOARD_KEY", raising=False)
     c = TestClient(app_from_env())
     sim = c.get("/api/sim").json()  # no access code needed
     assert sim["enabled"] and sim["step"] == 0 and sim["total"] == 12
@@ -82,9 +82,9 @@ def test_public_simulation_dashboard(team, monkeypatch):
 
 
 def test_public_dashboard_requires_a_team_list(monkeypatch):
-    from hivemind.ui import app_from_env
+    from memofull.ui import app_from_env
 
-    monkeypatch.setenv("HIVEMIND_PUBLIC", "1")
-    monkeypatch.delenv("HIVEMIND_TEAMS", raising=False)
+    monkeypatch.setenv("MEMOFULL_PUBLIC", "1")
+    monkeypatch.delenv("MEMOFULL_TEAMS", raising=False)
     with pytest.raises(RuntimeError):
         app_from_env()

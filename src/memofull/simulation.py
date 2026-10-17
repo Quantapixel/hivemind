@@ -4,7 +4,7 @@ Each step writes to a team graph through the same Brain calls that the
 agents' hooks and MCP tools make, so the dashboard shows exactly what a
 real team would see. The current step lives in the graph itself, so the
 story can be advanced from stateless serverless calls (the hosted demo)
-as well as from `hivemind simulate`.
+as well as from `memofull simulate`.
 """
 
 from __future__ import annotations
@@ -173,7 +173,7 @@ STEPS: list[tuple[str, str, Callable[[Graph], None], str | None]] = [
      "Aisha's checkout calls refund, so Ken is warned too. Two conflicts are now live on the dashboard.",
      _s6, None),
     ("Marco tries again, same failure",
-     "The same test fails the same way. Hivemind merges it into the existing memory (seen 2×) instead of adding a duplicate.",
+     "The same test fails the same way. Memofull merges it into the existing memory (seen 2×) instead of adding a duplicate.",
      _s7, VT),
     ("Marco hands off to Lena",
      "End of his day. The task, his two failures and a note on what to try next stay on the graph for whoever picks it up.",
